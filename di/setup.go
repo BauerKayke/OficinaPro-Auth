@@ -35,7 +35,10 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	// 3. Telemetry (observabilidade)
 	telemetryService, closeTelemetry, err := setupTelemetry(ctx, cfg)
 	if err != nil {
-		closeDB()
+		if closeErr := closeDB(); closeErr != nil {
+			// Log error but return original telemetry error
+			fmt.Printf("failed to close database during cleanup: %v\n", closeErr)
+		}
 		return nil, fmt.Errorf("telemetry: %w", err)
 	}
 
@@ -50,8 +53,14 @@ func NewContainer(ctx context.Context) (*Container, error) {
 
 	// 7. Montar container com cleanup function
 	closeAll := func() error {
+		// Close telemetry first (flush metrics/traces)
 		closeTelemetry()
-		return closeDB()
+
+		// Then close database
+		if err := closeDB(); err != nil {
+			return fmt.Errorf("failed to close database: %w", err)
+		}
+		return nil
 	}
 
 	return &Container{
