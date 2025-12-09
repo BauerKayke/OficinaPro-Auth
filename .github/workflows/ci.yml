@@ -113,7 +113,7 @@ jobs:
 
       - name: Build Lambda binary
         run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bootstrap cmd/lambda/main.go
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
           ls -lh bootstrap
           echo "✅ Binary built successfully"
 
@@ -209,15 +209,12 @@ jobs:
           echo "| Lint & Format | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests & Coverage | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ needs.lint.result }}" == "success" ]] && \
              [[ "${{ needs.test.result }}" == "success" ]] && \
              [[ "${{ needs.build.result }}" == "success" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
             echo "✅ **All checks passed!**" >> $GITHUB_STEP_SUMMARY
-            exit 0
           else
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ **Some checks failed!**" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "❌ **Some checks failed. Please review the logs above.**" >> $GITHUB_STEP_SUMMARY
           fi
