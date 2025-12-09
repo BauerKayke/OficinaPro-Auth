@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/oficinapro/auth-service/internal/domain/entity"
+	"github.com/oficinapro/auth-service/internal/domain/service"
 )
 
 // Mock ClienteRepository
@@ -63,16 +64,53 @@ func (m *MockValidatorService) NormalizeCPF(cpf string) string {
 	return args.String(0)
 }
 
+// Mock TelemetryService
+type MockTelemetryService struct {
+	mock.Mock
+}
+
+func (m *MockTelemetryService) StartSpan(ctx context.Context, name string) (context.Context, service.Span) {
+	args := m.Called(ctx, name)
+	return args.Get(0).(context.Context), &MockSpan{}
+}
+
+func (m *MockTelemetryService) RecordMetric(name string, value float64, attributes map[string]interface{}) {
+	m.Called(name, value, attributes)
+}
+
+func (m *MockTelemetryService) RecordDuration(name string, duration time.Duration, attributes map[string]interface{}) {
+	m.Called(name, duration, attributes)
+}
+
+func (m *MockTelemetryService) IncrementCounter(name string, attributes map[string]interface{}) {
+	m.Called(name, attributes)
+}
+
+func (m *MockTelemetryService) Shutdown(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+// Mock Span
+type MockSpan struct{}
+
+func (s *MockSpan) SetAttribute(key string, value interface{})              {}
+func (s *MockSpan) SetStatus(err error)                                     {}
+func (s *MockSpan) AddEvent(name string, attributes map[string]interface{}) {}
+func (s *MockSpan) End()                                                    {}
+
 func TestAuthenticateUseCase_Execute_Success(t *testing.T) {
 	// Arrange
 	mockRepo := new(MockClienteRepository)
 	mockJWT := new(MockJWTService)
 	mockValidator := new(MockValidatorService)
+	mockTelemetry := new(MockTelemetryService)
 
 	useCase := NewAuthenticateUseCase(
 		mockRepo,
 		mockJWT,
 		mockValidator,
+		mockTelemetry,
 		24*time.Hour,
 	)
 
@@ -89,6 +127,9 @@ func TestAuthenticateUseCase_Execute_Success(t *testing.T) {
 	}
 
 	// Setup mocks
+	mockTelemetry.On("StartSpan", ctx, "authenticate.execute").Return(ctx, &MockSpan{})
+	mockTelemetry.On("IncrementCounter", "authenticate.requests", mock.Anything).Return()
+	mockTelemetry.On("RecordDuration", "authenticate.duration", mock.Anything, mock.Anything).Return()
 	mockValidator.On("NormalizeCPF", input.CPF).Return("12345678909")
 	mockValidator.On("ValidateCPF", "12345678909").Return(true)
 	mockRepo.On("FindByCPF", ctx, "12345678909").Return(cliente, nil)
@@ -115,11 +156,13 @@ func TestAuthenticateUseCase_Execute_InvalidCPF(t *testing.T) {
 	mockRepo := new(MockClienteRepository)
 	mockJWT := new(MockJWTService)
 	mockValidator := new(MockValidatorService)
+	mockTelemetry := new(MockTelemetryService)
 
 	useCase := NewAuthenticateUseCase(
 		mockRepo,
 		mockJWT,
 		mockValidator,
+		mockTelemetry,
 		24*time.Hour,
 	)
 
@@ -127,6 +170,8 @@ func TestAuthenticateUseCase_Execute_InvalidCPF(t *testing.T) {
 	input := AuthenticateInput{CPF: "111.111.111-11"}
 
 	// Setup mocks
+	mockTelemetry.On("StartSpan", ctx, "authenticate.execute").Return(ctx, &MockSpan{})
+	mockTelemetry.On("IncrementCounter", "authenticate.requests", mock.Anything).Return()
 	mockValidator.On("NormalizeCPF", input.CPF).Return("11111111111")
 	mockValidator.On("ValidateCPF", "11111111111").Return(false)
 
@@ -148,11 +193,13 @@ func TestAuthenticateUseCase_Execute_ClienteNotFound(t *testing.T) {
 	mockRepo := new(MockClienteRepository)
 	mockJWT := new(MockJWTService)
 	mockValidator := new(MockValidatorService)
+	mockTelemetry := new(MockTelemetryService)
 
 	useCase := NewAuthenticateUseCase(
 		mockRepo,
 		mockJWT,
 		mockValidator,
+		mockTelemetry,
 		24*time.Hour,
 	)
 
@@ -160,6 +207,8 @@ func TestAuthenticateUseCase_Execute_ClienteNotFound(t *testing.T) {
 	input := AuthenticateInput{CPF: "123.456.789-09"}
 
 	// Setup mocks
+	mockTelemetry.On("StartSpan", ctx, "authenticate.execute").Return(ctx, &MockSpan{})
+	mockTelemetry.On("IncrementCounter", "authenticate.requests", mock.Anything).Return()
 	mockValidator.On("NormalizeCPF", input.CPF).Return("12345678909")
 	mockValidator.On("ValidateCPF", "12345678909").Return(true)
 	mockRepo.On("FindByCPF", ctx, "12345678909").Return(nil, entity.ErrClienteNotFound)
@@ -170,7 +219,7 @@ func TestAuthenticateUseCase_Execute_ClienteNotFound(t *testing.T) {
 	// Assert
 	assert.Error(t, err)
 	assert.Nil(t, output)
-	assert.Contains(t, err.Error(), "erro ao buscar cliente")
+	assert.Contains(t, err.Error(), "failed to find cliente")
 
 	mockValidator.AssertExpectations(t)
 	mockRepo.AssertExpectations(t)
@@ -182,11 +231,13 @@ func TestAuthenticateUseCase_Execute_ClienteInativo(t *testing.T) {
 	mockRepo := new(MockClienteRepository)
 	mockJWT := new(MockJWTService)
 	mockValidator := new(MockValidatorService)
+	mockTelemetry := new(MockTelemetryService)
 
 	useCase := NewAuthenticateUseCase(
 		mockRepo,
 		mockJWT,
 		mockValidator,
+		mockTelemetry,
 		24*time.Hour,
 	)
 
@@ -203,6 +254,8 @@ func TestAuthenticateUseCase_Execute_ClienteInativo(t *testing.T) {
 	}
 
 	// Setup mocks
+	mockTelemetry.On("StartSpan", ctx, "authenticate.execute").Return(ctx, &MockSpan{})
+	mockTelemetry.On("IncrementCounter", "authenticate.requests", mock.Anything).Return()
 	mockValidator.On("NormalizeCPF", input.CPF).Return("12345678909")
 	mockValidator.On("ValidateCPF", "12345678909").Return(true)
 	mockRepo.On("FindByCPF", ctx, "12345678909").Return(cliente, nil)
@@ -225,11 +278,13 @@ func TestAuthenticateUseCase_Execute_JWTGenerationError(t *testing.T) {
 	mockRepo := new(MockClienteRepository)
 	mockJWT := new(MockJWTService)
 	mockValidator := new(MockValidatorService)
+	mockTelemetry := new(MockTelemetryService)
 
 	useCase := NewAuthenticateUseCase(
 		mockRepo,
 		mockJWT,
 		mockValidator,
+		mockTelemetry,
 		24*time.Hour,
 	)
 
@@ -246,6 +301,8 @@ func TestAuthenticateUseCase_Execute_JWTGenerationError(t *testing.T) {
 	}
 
 	// Setup mocks
+	mockTelemetry.On("StartSpan", ctx, "authenticate.execute").Return(ctx, &MockSpan{})
+	mockTelemetry.On("IncrementCounter", "authenticate.requests", mock.Anything).Return()
 	mockValidator.On("NormalizeCPF", input.CPF).Return("12345678909")
 	mockValidator.On("ValidateCPF", "12345678909").Return(true)
 	mockRepo.On("FindByCPF", ctx, "12345678909").Return(cliente, nil)
@@ -258,7 +315,7 @@ func TestAuthenticateUseCase_Execute_JWTGenerationError(t *testing.T) {
 	// Assert
 	assert.Error(t, err)
 	assert.Nil(t, output)
-	assert.Contains(t, err.Error(), "erro ao gerar token")
+	assert.Contains(t, err.Error(), "failed to generate token")
 
 	mockValidator.AssertExpectations(t)
 	mockRepo.AssertExpectations(t)

@@ -9,18 +9,8 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-type Config struct {
-	Host            string
-	Port            string
-	Database        string
-	User            string
-	Password        string
-	SSLMode         string
-	MaxConnections  int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-}
-
+// NewGormConnection cria uma nova conexão GORM com PostgreSQL.
+// Configura prepared statements, pool de conexões e logging apropriado.
 func NewGormConnection(config Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
@@ -65,6 +55,8 @@ func NewGormConnection(config Config) (*gorm.DB, error) {
 	return db, nil
 }
 
+// CloseGorm fecha a conexão GORM e libera recursos.
+// Deve ser chamado ao finalizar a aplicação para evitar vazamento de conexões.
 func CloseGorm(db *gorm.DB) error {
 	if db != nil {
 		sqlDB, err := db.DB()

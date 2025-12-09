@@ -14,6 +14,7 @@ Microserviço serverless de autenticação via CPF e geração de JWT, implement
 - ✅ **SOLID Principles** - 97.3% compliant
 - ✅ **Dependency Injection** - Container DI na raiz
 - ✅ **GORM ORM** - Type-safe, proteção SQL injection
+- ✅ **OpenTelemetry** - Observabilidade com New Relic
 - ✅ **Zero Logs Excessivos** - Apenas logs essenciais
 - ✅ **Performance** - Cold start ~100ms, Warm ~10ms
 - ✅ **Seguro** - JWT, GORM prepared statements
@@ -145,6 +146,14 @@ AWS_REGION=us-east-1
 # App
 ENVIRONMENT=development
 LOG_LEVEL=info
+
+# Telemetry (OpenTelemetry + New Relic)
+TELEMETRY_ENABLED=true
+TELEMETRY_SERVICE_NAME=oficinapro-auth
+TELEMETRY_SERVICE_VERSION=1.0.0
+NEW_RELIC_LICENSE_KEY=your-new-relic-license-key
+NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+TELEMETRY_SAMPLE_RATE=1.0
 ```
 
 ---
@@ -265,6 +274,7 @@ make help           # Show all commands
 | [Clean Architecture](./docs/CLEAN_ARCHITECTURE.md) | Guia completo |
 | [SOLID Analysis](./docs/SOLID_ANALYSIS.md) | Análise 97.3% |
 | [Architecture Improvements](./docs/ARCHITECTURE_IMPROVEMENTS.md) | Melhorias |
+| [Telemetry Guide](./TELEMETRY_GUIDE.md) | OpenTelemetry + New Relic |
 | [API Documentation](./docs/API.md) | API REST |
 
 ---

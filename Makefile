@@ -54,12 +54,12 @@ test-unit: ## Run unit tests only
 
 build: clean ## Build Lambda binary
 	@echo "Building Lambda binary..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY_NAME) cmd/lambda/main.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY_NAME) ./cmd/lambda
 	@echo "Binary built: $(BINARY_NAME)"
 
 build-mac: clean ## Build for macOS (development)
 	@echo "Building for macOS..."
-	go build -o $(BINARY_NAME)-mac cmd/lambda/main.go
+	go build -o $(BINARY_NAME)-mac ./cmd/lambda
 	@echo "Binary built: $(BINARY_NAME)-mac"
 
 package: build ## Package Lambda for deployment
@@ -133,7 +133,9 @@ mod-update: ## Update Go dependencies
 
 all: clean lint test build ## Run all checks and build
 
-ci: lint test-coverage build ## CI pipeline
+ci: install-deps fmt vet test-coverage build ## CI pipeline (Complete validation)
+
+ci-fast: fmt vet test build ## CI pipeline (Fast - no coverage)
 
 .DEFAULT_GOAL := help
 
