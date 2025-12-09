@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for local development
+  postgres:
+    image: postgres:16-alpine
+    container_name: oficinapro-auth-db
+    environment:
+      POSTGRES_DB: oficinapro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - oficinapro-network
+
+  # Lambda local runtime (for testing)
+  lambda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oficinapro-auth-lambda
+    ports:
+      - "9000:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: oficinapro
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_SSL_MODE: disable
+      JWT_SECRET: local-development-secret-key-change-this-in-production-min-32-chars
+      JWT_EXPIRATION_HOURS: 24
+      JWT_ISSUER: oficinapro-auth-local
+      AWS_REGION: us-east-1
+      ENVIRONMENT: development
+      LOG_LEVEL: debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - oficinapro-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  oficinapro-network:
+    driver: bridge
+

@@ -1,0 +1,72 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"time"
+
+	"github.com/aws/aws-lambda-go/events"
+
+	"github.com/oficinapro/auth-service/internal/handler/request"
+	"github.com/oficinapro/auth-service/internal/handler/response"
+	"github.com/oficinapro/auth-service/internal/usecase"
+)
+
+type LambdaHandler struct {
+	authenticateUC *usecase.AuthenticateUseCase
+	errorHandler   *ErrorHandler
+}
+
+func NewLambdaHandler(authenticateUC *usecase.AuthenticateUseCase) *LambdaHandler {
+	return &LambdaHandler{
+		authenticateUC: authenticateUC,
+		errorHandler:   NewErrorHandler(),
+	}
+}
+
+func (h *LambdaHandler) Handle(ctx context.Context, apiRequest events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	start := time.Now()
+
+	if apiRequest.HTTPMethod != "POST" {
+		return h.errorHandler.methodNotAllowed(), nil
+	}
+
+	authReq, err := request.ParseAuthRequest(apiRequest.Body)
+	if err != nil {
+		return h.errorHandler.badRequest(err.Error()), nil
+	}
+
+	if err := authReq.Validate(); err != nil {
+		return h.errorHandler.badRequest(err.Error()), nil
+	}
+
+	ucInput := usecase.AuthenticateInput{CPF: authReq.CPF}
+	ucOutput, err := h.authenticateUC.Execute(ctx, ucInput)
+	if err != nil {
+		return h.errorHandler.HandleError(err), nil
+	}
+
+	authResp := response.NewAuthResponse(
+		ucOutput.Token,
+		ucOutput.ExpiresIn,
+		ucOutput.ClienteID,
+		ucOutput.Nome,
+	)
+
+	log.Printf("[Handler] Success in %v", time.Since(start))
+	return h.successResponse(authResp), nil
+}
+
+func (h *LambdaHandler) successResponse(data interface{}) events.APIGatewayProxyResponse {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return h.errorHandler.internalError("Internal server error")
+	}
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    defaultHeaders(),
+		Body:       string(body),
+	}
+}
