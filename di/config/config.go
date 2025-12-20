@@ -10,10 +10,11 @@ import (
 )
 
 type Config struct {
-	Database DatabaseConfig
-	JWT      JWTConfig
-	AWS      AWSConfig
-	App      AppConfig
+	Database  DatabaseConfig
+	JWT       JWTConfig
+	AWS       AWSConfig
+	App       AppConfig
+	Telemetry TelemetryConfig
 }
 
 type DatabaseConfig struct {
@@ -41,6 +42,16 @@ type AWSConfig struct {
 type AppConfig struct {
 	Environment string
 	LogLevel    string
+}
+
+// TelemetryConfig configurações de observabilidade (OpenTelemetry + New Relic).
+type TelemetryConfig struct {
+	Enabled          bool    // Habilita telemetry
+	ServiceName      string  // Nome do serviço
+	ServiceVersion   string  // Versão do serviço
+	NewRelicKey      string  // New Relic License Key
+	NewRelicEndpoint string  // New Relic OTLP endpoint
+	SampleRate       float64 // Taxa de amostragem (0.0 a 1.0)
 }
 
 func Load() (*Config, error) {
@@ -71,6 +82,14 @@ func Load() (*Config, error) {
 		App: AppConfig{
 			Environment: getEnv("ENVIRONMENT", "development"),
 			LogLevel:    getEnv("LOG_LEVEL", "info"),
+		},
+		Telemetry: TelemetryConfig{
+			Enabled:          getEnvAsBool("TELEMETRY_ENABLED", true),
+			ServiceName:      getEnv("TELEMETRY_SERVICE_NAME", "oficinapro-auth"),
+			ServiceVersion:   getEnv("TELEMETRY_SERVICE_VERSION", "1.0.0"),
+			NewRelicKey:      getEnv("NEW_RELIC_LICENSE_KEY", ""),
+			NewRelicEndpoint: getEnv("NEW_RELIC_OTLP_ENDPOINT", "https://otlp.nr-data.net:4317"),
+			SampleRate:       getEnvAsFloat("TELEMETRY_SAMPLE_RATE", 1.0),
 		},
 	}
 
@@ -127,6 +146,30 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 	}
 
 	value, err := time.ParseDuration(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
 	if err != nil {
 		return defaultValue
 	}
