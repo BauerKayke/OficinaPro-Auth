@@ -1,126 +1,157 @@
-# 🔐 Oficina Pro - Auth Service (Go)
+# Auth Gateway - OficinaPro
 
-Microserviço serverless de autenticação via CPF e geração de JWT, implementado seguindo **Clean Architecture**, **SOLID** e **boas práticas Go**.
+Auth Gateway usando AWS Lambda para autenticação via email+senha com JWT.
 
-[![Go Version](https://img.shields.io/badge/Go-1.21-blue.svg)](https://golang.org)
-[![SOLID](https://img.shields.io/badge/SOLID-97.3%25-brightgreen.svg)](./docs/SOLID_ANALYSIS.md)
-[![Clean Architecture](https://img.shields.io/badge/Clean-Architecture-orange.svg)](./docs/CLEAN_ARCHITECTURE.md)
+## 🎯 Visão Geral
 
----
+Serviço de autenticação serverless que:
+- Valida credenciais (email + senha com bcrypt)
+- Gera tokens JWT para autenticação
+- Integra-se com infraestrutura existente (VPC, RDS, EKS)
+- Roda como AWS Lambda + API Gateway
 
-## 🎯 Características
+## 🏗️ Arquitetura
 
-- ✅ **Clean Architecture** - Camadas independentes e testáveis
-- ✅ **SOLID Principles** - 97.3% compliant
-- ✅ **Dependency Injection** - Container DI na raiz
-- ✅ **GORM ORM** - Type-safe, proteção SQL injection
-- ✅ **OpenTelemetry** - Observabilidade com New Relic
-- ✅ **Zero Logs Excessivos** - Apenas logs essenciais
-- ✅ **Performance** - Cold start ~100ms, Warm ~10ms
-- ✅ **Seguro** - JWT, GORM prepared statements
+```
+Cliente
+  ↓
+API Gateway (HTTPS)
+  ↓
+Lambda (Auth Gateway)
+  ↓
+RDS PostgreSQL
+  ↓
+JWT Token ← Cliente → Kubernetes Services
+```
 
----
+**Arquitetura Híbrida**:
+- **Lambda**: Autenticação (stateless, escalável, pay-per-use)
+- **Kubernetes**: Aplicações de negócio (stateful, validam JWT localmente)
 
-## 📁 Estrutura do Projeto
+## 📦 Estrutura do Projeto
 
 ```
 auth-oficinapro/
-├── cmd/
-│   └── lambda/
-│       └── main.go                      # Entry point (25 linhas)
-│
-├── di/                                  # Dependency Injection (raiz)
-│   ├── container.go                     # DI Container principal
-│   ├── infrastructure.go                # Database, cache init
-│   ├── repositories.go                  # Repository setup
-│   ├── services.go                      # Services setup
-│   ├── usecases.go                      # Use cases setup
-│   └── config/                          # Configuration
-│       └── config.go
-│
-├── internal/
-│   ├── handler/                         # HTTP Layer
-│   │   ├── lambda_handler.go
-│   │   ├── errors.go
-│   │   ├── request/
-│   │   │   └── auth_request.go
-│   │   └── response/
-│   │       ├── auth_response.go
-│   │       └── error_response.go
-│   │
-│   ├── usecase/                         # Business Logic
-│   │   └── authenticate_usecase.go
-│   │
-│   ├── domain/                          # Domain Layer (puro)
-│   │   ├── entity/
-│   │   │   ├── cliente.go
-│   │   │   └── errors.go
-│   │   ├── repository/
-│   │   │   └── cliente_repository.go
-│   │   └── service/
-│   │       ├── jwt_service.go
-│   │       └── validator_service.go
-│   │
-│   └── infrastructure/                  # Adapters
-│       ├── database/
-│       │   ├── models.go
-│       │   ├── gorm_connection.go
-│       │   └── gorm_cliente_repository.go
-│       ├── jwt/
-│       │   └── jwt_service_impl.go
-│       └── validator/
-│           └── cpf_validator.go
-│
-├── docs/                                # Documentação
-│   ├── CLEAN_ARCHITECTURE.md
-│   ├── SOLID_ANALYSIS.md
-│   ├── ARCHITECTURE_IMPROVEMENTS.md
-│   └── API.md
-│
-├── scripts/
-│   └── init.sql
-│
-├── .github/workflows/
-│   ├── ci.yml
-│   └── cd.yml
-│
-├── go.mod
-├── Makefile
-├── Dockerfile
-├── docker-compose.yml
+├── cmd/lambda/              # Entrypoint Lambda
+├── internal/                # Código da aplicação
+│   ├── domain/             # Entidades, repositórios, serviços
+│   ├── usecase/            # Casos de uso
+│   ├── handler/            # HTTP handlers
+│   └── infrastructure/     # GORM, JWT, Telemetry
+├── di/                      # Dependency Injection
+├── terraform/lambda/        # Infraestrutura Lambda
+├── k8s/order-service/       # Manifests Kubernetes exemplo
+├── examples/order-service/  # Serviço Go exemplo
+├── scripts/                 # Scripts SQL
+├── Dockerfile              # Build Lambda
+├── Makefile               # Comandos úteis
 └── README.md
 ```
-
----
 
 ## 🚀 Quick Start
 
 ### Pré-requisitos
+- Go 1.23+
+- Docker
+- Terraform
+- AWS CLI configurado
+- kubectl (para Kubernetes)
 
-- Go 1.21+
-- Docker & Docker Compose
-- Make
-
-### Instalação
-
+### 1. Build Local
 ```bash
-# 1. Clone o repositório
-cd auth-oficinapro
-
-# 2. Instalar dependências
-make install-deps
-
-# 3. Configurar ambiente
-cp .env.example .env
-
-# 4. Rodar testes
-make test
-
-# 5. Iniciar ambiente local
-docker-compose up -d
+make build
 ```
 
----
+### 2. Testes
+```bash
+make test
+make test-coverage
+```
+
+### 3. Deploy
+```bash
+# Deploy infraestrutura (Lambda + API Gateway)
+cd terraform/lambda
+terraform init
+terraform apply
+
+# Deploy serviços Kubernetes (opcional)
+kubectl apply -k k8s/order-service/
+```
+
+## 🔐 Autenticação
+
+### Endpoint: POST /auth
+
+**Request**:
+```json
+{
+  "email": "user@example.com",
+  "senha": "senha123"
+}
+```
+
+**Response (200 OK)**:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": 3600,
+  "userId": 123,
+  "email": "user@example.com",
+  "nome": "User Name",
+  "role": "USER"
+}
+```
+
+**Response (401 Unauthorized)**:
+```json
+{
+  "error": "Credenciais inválidas",
+  "timestamp": "2024-12-20T10:30:00Z"
+}
+```
+
+### Usar JWT em outros serviços
+
+```bash
+# Obter token
+TOKEN=$(curl -s -X POST https://api.oficinapro.com/auth \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@test.com","senha":"senha123"}' | jq -r '.token')
+
+# Usar token
+curl -H "Authorization: Bearer $TOKEN" \
+  https://orders.oficinapro.com/orders
+```
+
+## 🧪 Testes
+
+```bash
+# Rodar todos os testes
+make test
+
+# Com coverage
+make test-coverage
+
+# Específico
+go test -v ./internal/handler/...
+go test -v ./internal/domain/entity/...
+```
+
+**Cobertura de Testes**:
+- ✅ **91.8%** nos pacotes de negócio (domain, usecase, handler)
+- ✅ 150+ casos de teste
+- ✅ Testes unitários e de integração
+- ✅ Ver [`TEST_COVERAGE_REPORT.md`](TEST_COVERAGE_REPORT.md) para detalhes
+
+## 📊 Endpoints
+
+| Método | Path | Descrição | Auth |
+|--------|------|-----------|------|
+| POST | `/auth` | Autenticação email+senha | ❌ |
+| GET | `/health` | Health check | ❌ |
+| POST | `/auth/validate` | Validar JWT | ✅ |
+| OPTIONS | `/*` | CORS preflight | ❌ |
 
 ## 🔧 Configuração
 
@@ -128,165 +159,116 @@ docker-compose up -d
 
 ```bash
 # Database
-DB_HOST=localhost
+DB_HOST=postgres.rds.amazonaws.com
 DB_PORT=5432
 DB_NAME=oficinapro
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_SSL_MODE=disable
+DB_USER=oficinapro_app
+DB_PASSWORD=secret
 
-# JWT (mínimo 32 caracteres)
-JWT_SECRET=your-super-secret-key-min-32-chars
-JWT_EXPIRATION_HOURS=24
-JWT_ISSUER=oficinapro-auth
+# JWT
+JWT_SECRET=your-secret-key-min-32-chars
+JWT_ISSUER=auth-oficinapro
+JWT_EXPIRATION=3600  # segundos
 
-# AWS
-AWS_REGION=us-east-1
-
-# App
-ENVIRONMENT=development
-LOG_LEVEL=info
-
-# Telemetry (OpenTelemetry + New Relic)
-TELEMETRY_ENABLED=true
-TELEMETRY_SERVICE_NAME=oficinapro-auth
-TELEMETRY_SERVICE_VERSION=1.0.0
-NEW_RELIC_LICENSE_KEY=your-new-relic-license-key
-NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
-TELEMETRY_SAMPLE_RATE=1.0
+# Application
+ENVIRONMENT=production
 ```
 
----
+## 🔗 Integração com app-infra
 
-## 🧪 Testes
-
-```bash
-# Testes unitários
-make test
-
-# Com coverage
-make test-coverage
-
-# Benchmarks
-make benchmark
-```
-
----
-
-## 📦 Deploy
-
-```bash
-# Build otimizado
-make build
-
-# Deploy staging
-make deploy-staging
-
-# Deploy production
-make deploy-prod
-```
-
----
-
-## 📊 Arquitetura DI
-
-### Container Pattern
-
-O DI Container está na **raiz** seguindo o padrão Fury:
-
-```go
-// di/container.go
-type Container struct {
-    Config           *config.Config
-    DB               *gorm.DB
-    ClienteRepo      repository.ClienteRepository
-    JWTService       service.JWTService
-    ValidatorService service.ValidatorService
-    AuthenticateUC   *usecase.AuthenticateUseCase
-}
-```
-
-### Separação de Responsabilidades
-
-- `container.go` - Coordenação geral
-- `infrastructure.go` - DB, cache, conexões
-- `repositories.go` - Repositórios
-- `services.go` - JWT, validators
-- `usecases.go` - Casos de uso
-- `config/` - Configurações
-
----
-
-## 🎯 SOLID Compliance: 97.3% ✅
-
-| Princípio | Status |
-|-----------|--------|
-| **Single Responsibility** | ✅ 100% |
-| **Open/Closed** | ✅ 100% |
-| **Liskov Substitution** | ✅ 100% |
-| **Interface Segregation** | ✅ 100% |
-| **Dependency Inversion** | ✅ 93% |
-
-Veja análise completa: [`docs/SOLID_ANALYSIS.md`](./docs/SOLID_ANALYSIS.md)
-
----
-
-## 🔒 Segurança
-
-- ✅ **SQL Injection Prevention** - GORM prepared statements
-- ✅ **JWT HMAC-SHA256** - Token seguro
-- ✅ **CPF Validation** - Algoritmo oficial
-- ✅ **Input Validation** - Todas as entradas
-- ✅ **Logs Seguros** - Sem dados sensíveis
-
----
-
-## 📈 Performance
-
-| Métrica | Valor |
-|---------|-------|
-| **Cold Start** | ~100ms |
-| **Warm Execution** | ~10ms |
-| **Memory** | 128MB |
-| **Cost (1M requests)** | $0.21 |
-
----
-
-## 🛠️ Comandos Úteis
-
-```bash
-make build          # Build binary
-make test           # Run tests
-make lint           # Lint code
-make docker-build   # Build image
-make deploy-staging # Deploy staging
-make deploy-prod    # Deploy production
-make clean          # Clean artifacts
-make help           # Show all commands
-```
-
----
+Este projeto integra-se com o repositório `OficinaPro-DevOps/app-infra` que provisiona:
+- VPC e Subnets
+- RDS PostgreSQL
+- EKS Cluster
+- Security Groups
 
 ## 📚 Documentação
 
 | Documento | Descrição |
 |-----------|-----------|
-| [Clean Architecture](./docs/CLEAN_ARCHITECTURE.md) | Guia completo |
-| [SOLID Analysis](./docs/SOLID_ANALYSIS.md) | Análise 97.3% |
-| [Architecture Improvements](./docs/ARCHITECTURE_IMPROVEMENTS.md) | Melhorias |
-| [Telemetry Guide](./TELEMETRY_GUIDE.md) | OpenTelemetry + New Relic |
-| [API Documentation](./docs/API.md) | API REST |
+| [`CHANGELOG.md`](CHANGELOG.md) | Histórico de mudanças |
+| [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md) | Guia de deploy completo |
+| [`TESTING_GUIDE.md`](TESTING_GUIDE.md) | Guia de testes e qualidade |
+| [`TEST_COVERAGE_REPORT.md`](TEST_COVERAGE_REPORT.md) | Relatório de cobertura (91.8%) |
+| [`terraform/lambda/README.md`](terraform/lambda/README.md) | Infraestrutura Lambda |
+| [`k8s/order-service/README.md`](k8s/order-service/README.md) | Exemplo Kubernetes |
+
+## 🛠️ Comandos Úteis (Makefile)
+
+```bash
+# Build
+make build              # Build local
+make build-lambda       # Build para Lambda
+make docker-build       # Build Docker image
+
+# Testes
+make test              # Rodar testes
+make test-coverage     # Coverage report
+make test-integration  # Testes de integração
+
+# Deploy
+make deploy-infra      # Deploy Terraform
+make deploy-k8s        # Deploy Kubernetes
+
+# Limpeza
+make clean            # Limpar binários
+make clean-test       # Limpar coverage files
+
+# Desenvolvimento
+make fmt              # Format código
+make lint             # Lint
+make run-local        # Rodar localmente
+```
+
+## 🏆 Features
+
+- ✅ Clean Architecture
+- ✅ SOLID Principles
+- ✅ Dependency Injection
+- ✅ Bcrypt password hashing
+- ✅ JWT HMAC-SHA256
+- ✅ OpenTelemetry + New Relic ready
+- ✅ Graceful shutdown
+- ✅ Error handling centralizado
+- ✅ CORS support
+- ✅ Health checks
+- ✅ **91.8% test coverage**
+- ✅ Multi-stage Dockerfile
+- ✅ Terraform IaC
+- ✅ Kubernetes manifests
+- ✅ CI/CD com GitHub Actions
+- ✅ Dual mode: Lambda + HTTP server
+
+## 📈 Performance
+
+- **Cold start**: ~500ms
+- **Warm execution**: ~50ms
+- **Memory**: 256MB-512MB
+- **Timeout**: 30s
+- **Concurrency**: Auto-scaling
+
+## 🔒 Segurança
+
+- ✅ Bcrypt (cost 10)
+- ✅ JWT HMAC-SHA256
+- ✅ AWS Secrets Manager
+- ✅ VPC integration
+- ✅ Security Groups
+- ✅ IAM least privilege
+- ✅ HTTPS only (API Gateway)
+- ✅ Password validation (min 6 chars)
+- ✅ Email validation
+
+## 📝 Licença
+
+Projeto acadêmico - FIAP Tech Challenge
+
+## 👥 Equipe
+
+Desenvolvido para o Tech Challenge da FIAP
 
 ---
 
-## 🏆 Highlights
-
-- ✅ **Main com 25 linhas** - Minimalista
-- ✅ **DI na raiz** - Padrão Fury
-- ✅ **Zero logs excessivos** - Apenas essenciais
-- ✅ **GORM type-safe** - Segurança
-- ✅ **97.3% SOLID** - Enterprise grade
-
----
-
-**Desenvolvido com ❤️ seguindo Clean Architecture, SOLID e Go best practices** 🚀
+**Status**: ✅ Produção Ready
+**Test Coverage**: 91.8%
+**Última atualização**: 21 de dezembro de 2025

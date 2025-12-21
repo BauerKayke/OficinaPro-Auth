@@ -90,3 +90,64 @@ func TestJWTServiceImpl_ValidateToken_ExpiredToken(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, claims)
 }
+
+func TestJWTServiceImpl_ValidateToken_WrongSecret(t *testing.T) {
+	// Criar token com um secret
+	secret1 := "test-secret-key-min-32-characters-long"
+	issuer := "test-issuer"
+	service1 := NewJWTService(secret1, issuer)
+
+	payload := map[string]interface{}{
+		"id": int64(123),
+	}
+	token, err := service1.GenerateToken(payload, 1*time.Hour)
+	assert.NoError(t, err)
+
+	// Tentar validar com secret diferente
+	secret2 := "another-secret-key-min-32-characters"
+	service2 := NewJWTService(secret2, issuer)
+
+	claims, err := service2.ValidateToken(token)
+	assert.Error(t, err)
+	assert.Nil(t, claims)
+}
+
+func TestJWTServiceImpl_ValidateToken_EmptyToken(t *testing.T) {
+	secret := "test-secret-key-min-32-characters-long"
+	issuer := "test-issuer"
+	service := NewJWTService(secret, issuer)
+
+	claims, err := service.ValidateToken("")
+	assert.Error(t, err)
+	assert.Nil(t, claims)
+}
+
+func TestJWTServiceImpl_GenerateToken_WithComplexPayload(t *testing.T) {
+	secret := "test-secret-key-min-32-characters-long"
+	issuer := "test-issuer"
+	service := NewJWTService(secret, issuer)
+
+	payload := map[string]interface{}{
+		"id":          int64(123),
+		"nome":        "João Silva",
+		"email":       "joao@example.com",
+		"role":        "ADMIN",
+		"permissions": []string{"read", "write", "delete"},
+		"metadata": map[string]interface{}{
+			"departamento": "TI",
+			"nivel":        5,
+		},
+	}
+
+	token, err := service.GenerateToken(payload, 1*time.Hour)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, token)
+
+	// Validar e verificar payload
+	claims, err := service.ValidateToken(token)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(123), claims["id"]) // JSON numbers são float64
+	assert.Equal(t, "João Silva", claims["nome"])
+	assert.Equal(t, "joao@example.com", claims["email"])
+	assert.Equal(t, "ADMIN", claims["role"])
+}

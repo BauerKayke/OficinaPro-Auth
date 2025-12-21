@@ -128,18 +128,17 @@ func TestCliente_ToAuthPayload(t *testing.T) {
 	result := cliente.ToAuthPayload()
 
 	assert.NotNil(t, result)
-	assert.Equal(t, int64(123), result.ClienteID)
+	assert.Equal(t, int64(123), result.UserID)
 	assert.Equal(t, "Maria Oliveira", result.Nome)
 	assert.Equal(t, "maria@example.com", result.Email)
-	assert.Equal(t, "98765432100", result.Documento)
+	assert.Equal(t, "USER", result.Role) // Clientes legados sempre USER
 
 	// Testar conversão para map
 	resultMap := result.ToMap()
-	expected := map[string]interface{}{
-		"cliente_id": int64(123),
-		"nome":       "Maria Oliveira",
-		"email":      "maria@example.com",
-		"documento":  "98765432100",
-	}
-	assert.Equal(t, expected, resultMap)
+	
+	// Verificar campos principais
+	assert.Equal(t, int64(123), resultMap["userId"])
+	assert.Equal(t, "Maria Oliveira", resultMap["nome"])
+	assert.Equal(t, "maria@example.com", resultMap["email"])
+	assert.Equal(t, "USER", resultMap["role"])
 }
