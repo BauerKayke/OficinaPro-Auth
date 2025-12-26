@@ -1,3 +1,5 @@
+// Package config fornece configuração centralizada da aplicação.
+// Carrega variáveis de ambiente e valida configurações obrigatórias.
 package config
 
 import (
@@ -59,6 +61,21 @@ func Load() (*Config, error) {
 		_ = godotenv.Load()
 	}
 
+	// Determinar defaults baseado no ambiente
+	// Produção (Lambda): pool pequeno para evitar "too many connections"
+	// Desenvolvimento: pool maior para permitir múltiplas conexões locais
+	isProduction := os.Getenv("ENVIRONMENT") == "production"
+
+	defaultMaxConns := 10
+	defaultIdleConns := 5
+	defaultConnTimeout := 30
+
+	if isProduction {
+		defaultMaxConns = 2
+		defaultIdleConns = 1
+		defaultConnTimeout = 10
+	}
+
 	config := &Config{
 		Database: DatabaseConfig{
 			Host:               getEnv("DB_HOST", "localhost"),
@@ -67,9 +84,9 @@ func Load() (*Config, error) {
 			User:               getEnv("DB_USER", "postgres"),
 			Password:           getEnv("DB_PASSWORD", ""),
 			SSLMode:            getEnv("DB_SSL_MODE", "disable"),
-			MaxConnections:     getEnvAsInt("DB_MAX_CONNECTIONS", 10),
-			MaxIdleConnections: getEnvAsInt("DB_MAX_IDLE_CONNECTIONS", 5),
-			ConnectionTimeout:  getEnvAsDuration("DB_CONNECTION_TIMEOUT", 30*time.Second),
+			MaxConnections:     getEnvAsInt("DB_MAX_CONNECTIONS", defaultMaxConns),
+			MaxIdleConnections: getEnvAsInt("DB_MAX_IDLE_CONNECTIONS", defaultIdleConns),
+			ConnectionTimeout:  getEnvAsDuration("DB_CONNECTION_TIMEOUT", time.Duration(defaultConnTimeout)*time.Second),
 		},
 		JWT: JWTConfig{
 			Secret:     getEnv("JWT_SECRET", ""),

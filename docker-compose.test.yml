@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: auth-postgres-test
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - auth-network
+
+  auth-service:
+    image: auth-service:http-test
+    container_name: auth-service-test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: auth_user
+      DB_PASSWORD: auth_pass
+      DB_SSL_MODE: disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_CONN_MAX_LIFETIME: 5m
+
+      # JWT
+      JWT_SECRET: my-super-secret-jwt-key-change-in-production
+      JWT_EXPIRATION: 3600
+
+      # Server
+      APP_ENV: local
+      APP_PORT: 8080
+
+      # Telemetry
+      TELEMETRY_ENABLED: false
+
+      # CORS
+      CORS_ALLOWED_ORIGINS: "*"
+    ports:
+      - "8080:8080"
+    networks:
+      - auth-network
+
+networks:
+  auth-network:
+    driver: bridge
+

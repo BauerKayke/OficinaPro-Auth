@@ -28,9 +28,18 @@ type errorMapping struct {
 func NewDefaultErrorMapper() *DefaultErrorMapper {
 	return &DefaultErrorMapper{
 		mappings: map[error]errorMapping{
-			entity.ErrInvalidCPF:      {http.StatusUnauthorized, "CPF inválido"},
-			entity.ErrClienteNotFound: {http.StatusUnauthorized, "Cliente não encontrado"},
-			entity.ErrClienteInativo:  {http.StatusUnauthorized, "Cliente inativo"},
+			// Erros de Usuario (novos)
+			entity.ErrUsuarioNotFound:    {http.StatusUnauthorized, "Credenciais inválidas"}, // Não expor se é email ou senha
+			entity.ErrInvalidCredentials: {http.StatusUnauthorized, "Credenciais inválidas"},
+			entity.ErrUsuarioInactive:    {http.StatusForbidden, "Usuário inativo"},
+			entity.ErrInvalidEmail:       {http.StatusBadRequest, "Email inválido"},
+			entity.ErrWeakPassword:       {http.StatusBadRequest, "Senha muito fraca"},
+			entity.ErrEmailAlreadyExists: {http.StatusConflict, "Email já cadastrado"},
+
+			// Erros de Cliente (legados - manter para compatibilidade se necessário)
+			entity.ErrInvalidCPF:      {http.StatusBadRequest, "CPF inválido"},
+			entity.ErrClienteNotFound: {http.StatusNotFound, "Cliente não encontrado"},
+			entity.ErrClienteInativo:  {http.StatusForbidden, "Cliente inativo"},
 			entity.ErrInvalidDocument: {http.StatusBadRequest, "Documento inválido"},
 		},
 	}
