@@ -37,7 +37,7 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	jwtService, validatorService := setupServices(cfg)
 
 	// 5. Use Cases
-	authenticateUC := setupUseCases(cfg, clienteRepo, jwtService, validatorService)
+	authenticateUC, authorizeUC := setupUseCases(cfg, clienteRepo, jwtService, validatorService)
 
 	// 6. Montar container
 	return &Container{
@@ -45,6 +45,7 @@ func NewContainer(ctx context.Context) (*Container, error) {
 		jwtService:       jwtService,
 		validatorService: validatorService,
 		authenticateUC:   authenticateUC,
+		authorizeUC:      authorizeUC,
 		closeFunc:        closeDB,
 	}, nil
 }
@@ -91,11 +92,15 @@ func setupUseCases(
 	clienteRepo repository.ClienteRepository,
 	jwtService service.JWTService,
 	validatorService service.ValidatorService,
-) *usecase.AuthenticateUseCase {
-	return usecase.NewAuthenticateUseCase(
+) (*usecase.AuthenticateUseCase, *usecase.AuthorizeUseCase) {
+	authUC := usecase.NewAuthenticateUseCase(
 		clienteRepo,
 		jwtService,
 		validatorService,
 		cfg.JWT.Expiration,
 	)
+	
+	authorizeUC := usecase.NewAuthorizeUseCase(jwtService)
+
+	return authUC, authorizeUC
 }

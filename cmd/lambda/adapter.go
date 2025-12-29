@@ -2,29 +2,75 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 
 	"github.com/oficinapro/auth-service/internal/handler"
+	"github.com/oficinapro/auth-service/internal/usecase"
 )
 
-// LambdaAdapter adapta APIGateway para HTTPRequest (Adapter Pattern)
+// LambdaAdapter adapta eventos AWS para lógica interna
 type LambdaAdapter struct {
-	authHandler *handler.AuthHandler
+	authHandler  *handler.AuthHandler
+	authorizeUC  *usecase.AuthorizeUseCase
 }
 
 // NewLambdaAdapter cria novo adapter
-func NewLambdaAdapter(authHandler *handler.AuthHandler) *LambdaAdapter {
+func NewLambdaAdapter(authHandler *handler.AuthHandler, authorizeUC *usecase.AuthorizeUseCase) *LambdaAdapter {
 	return &LambdaAdapter{
 		authHandler: authHandler,
+		authorizeUC: authorizeUC,
 	}
 }
 
-// Handle adapta APIGatewayProxyRequest → HTTPRequest → HTTPResponse → APIGatewayProxyResponse
-func (a *LambdaAdapter) Handle(ctx context.Context, apiReq events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// Converter APIGateway → HTTP abstrato
+// Handle é o ponto de entrada genérico
+func (a *LambdaAdapter) Handle(ctx context.Context, rawEvent json.RawMessage) (interface{}, error) {
+	// 1. Tentar detectar se é um Authorizer Request
+	var authEvent events.APIGatewayV2CustomAuthorizerV2Request
+	if err := json.Unmarshal(rawEvent, &authEvent); err == nil {
+		// Verificamos campos chaves para confirmar
+		if authEvent.RouteArn != "" && len(authEvent.Headers) > 0 {
+			return a.handleAuthorizer(ctx, authEvent)
+		}
+	}
+
+	// 2. Assumir que é HTTP Request (Login) - Formato V2
+	var httpEvent events.APIGatewayV2HTTPRequest
+	if err := json.Unmarshal(rawEvent, &httpEvent); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+	}
+	return a.handleHttp(ctx, httpEvent)
+}
+
+// handleAuthorizer trata validação de token
+func (a *LambdaAdapter) handleAuthorizer(ctx context.Context, req events.APIGatewayV2CustomAuthorizerV2Request) (events.APIGatewayV2CustomAuthorizerSimpleResponse, error) {
+	token := req.Headers["authorization"] // Headers são case-insensitive no V2? Geralmente sim, mas Go map não. AWS normaliza para lowercase em V2?
+	if token == "" {
+		token = req.Headers["Authorization"]
+	}
+
+	isAuthorized, err := a.authorizeUC.Execute(token)
+	if err != nil {
+		fmt.Printf("Authorization failed: %v\n", err)
+		return events.APIGatewayV2CustomAuthorizerSimpleResponse{IsAuthorized: false}, nil
+	}
+
+	return events.APIGatewayV2CustomAuthorizerSimpleResponse{
+		IsAuthorized: isAuthorized,
+		Context: map[string]interface{}{
+			"user": "authenticated", // Pode injetar claims aqui
+		},
+	}, nil
+}
+
+// handleHttp trata login
+func (a *LambdaAdapter) handleHttp(ctx context.Context, apiReq events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	// Converter APIGateway V2 → HTTP abstrato
 	httpReq := handler.HTTPRequest{
-		Method:  apiReq.HTTPMethod,
+		Method:  apiReq.RequestContext.HTTP.Method,
 		Body:    []byte(apiReq.Body),
 		Headers: apiReq.Headers,
 	}
@@ -32,8 +78,8 @@ func (a *LambdaAdapter) Handle(ctx context.Context, apiReq events.APIGatewayProx
 	// Processar com handler HTTP (framework agnostic)
 	httpResp := a.authHandler.Handle(ctx, httpReq)
 
-	// Converter HTTP abstrato → APIGateway
-	return events.APIGatewayProxyResponse{
+	// Converter HTTP abstrato → APIGateway V2
+	return events.APIGatewayV2HTTPResponse{
 		StatusCode: httpResp.StatusCode,
 		Headers:    httpResp.Headers,
 		Body:       string(httpResp.Body),

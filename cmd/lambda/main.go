@@ -33,7 +33,7 @@ func init() {
 	)
 
 	// 4. Criar adapter Lambda (camada externa - Adapter Pattern)
-	lambdaAdapter = NewLambdaAdapter(authHandler)
+	lambdaAdapter = NewLambdaAdapter(authHandler, container.AuthorizeUseCase())
 }
 
 func main() {

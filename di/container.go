@@ -15,6 +15,7 @@ type Container struct {
 	jwtService       service.JWTService
 	validatorService service.ValidatorService
 	authenticateUC   *usecase.AuthenticateUseCase
+	authorizeUC      *usecase.AuthorizeUseCase
 	closeFunc        func() error
 }
 
@@ -34,6 +35,10 @@ func (c *Container) ValidatorService() service.ValidatorService {
 
 func (c *Container) AuthenticateUseCase() *usecase.AuthenticateUseCase {
 	return c.authenticateUC
+}
+
+func (c *Container) AuthorizeUseCase() *usecase.AuthorizeUseCase {
+	return c.authorizeUC
 }
 
 // Close fecha recursos (lifecycle management)
