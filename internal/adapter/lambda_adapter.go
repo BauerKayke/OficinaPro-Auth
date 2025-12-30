@@ -13,8 +13,8 @@ import (
 
 // LambdaAdapter adapta eventos AWS para lógica interna
 type LambdaAdapter struct {
-	authHandler  *handler.AuthHandler
-	authorizeUC  *usecase.AuthorizeUseCase
+	authHandler *handler.AuthHandler
+	authorizeUC *usecase.AuthorizeUseCase
 }
 
 // NewLambdaAdapter cria novo adapter
@@ -54,6 +54,7 @@ func (a *LambdaAdapter) handleAuthorizer(ctx context.Context, req events.APIGate
 	isAuthorized, err := a.authorizeUC.Execute(token)
 	if err != nil {
 		// Log erro, mas não retorna erro para o Gateway (apenas nega acesso)
+		fmt.Printf("Authorization failed: %v\n", err)
 		return events.APIGatewayV2CustomAuthorizerSimpleResponse{IsAuthorized: false}, nil
 	}
 
