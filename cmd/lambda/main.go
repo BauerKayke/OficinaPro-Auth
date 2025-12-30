@@ -36,13 +36,12 @@ func init() {
 
 	authHandler := handler.NewAuthHandler(
 		container.AuthenticateUseCase(),
-		container.JWTService(),
 		errorMapper,
 		logger,
 	)
 
-	// Cria adapter Lambda
-	lambdaAdapter = adapter.NewLambdaAdapter(authHandler)
+	// Cria adapter Lambda (Injetando AuthorizeUseCase também)
+	lambdaAdapter = adapter.NewLambdaAdapter(authHandler, container.AuthorizeUseCase())
 
 	// Configura graceful shutdown
 	setupGracefulShutdown()

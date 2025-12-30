@@ -20,6 +20,7 @@ type Container struct {
 	validatorService service.ValidatorService
 	telemetryService service.TelemetryService
 	authenticateUC   *usecase.AuthenticateUseCase
+	authorizeUC      *usecase.AuthorizeUseCase
 	closeFunc        func() error
 }
 
@@ -63,6 +64,11 @@ func (c *Container) TelemetryService() service.TelemetryService {
 // AuthenticateUseCase retorna o caso de uso de autenticação configurado.
 func (c *Container) AuthenticateUseCase() *usecase.AuthenticateUseCase {
 	return c.authenticateUC
+}
+
+// AuthorizeUseCase retorna o caso de uso de autorização configurado.
+func (c *Container) AuthorizeUseCase() *usecase.AuthorizeUseCase {
+	return c.authorizeUC
 }
 
 // Close libera recursos do container (conexões de banco, telemetry, etc).

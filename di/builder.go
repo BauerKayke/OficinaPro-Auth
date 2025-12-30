@@ -26,6 +26,7 @@ type builder struct {
 	jwtService       service.JWTService
 	validatorService service.ValidatorService
 	authenticateUC   *usecase.AuthenticateUseCase
+	authorizeUC      *usecase.AuthorizeUseCase
 }
 
 // newBuilder cria um novo builder para construção do container.
@@ -103,6 +104,9 @@ func (b *builder) setupUseCases() {
 		b.jwtService,
 		b.telemetryService,
 	)
+	
+	// Novo UseCase de Autorização
+	b.authorizeUC = usecase.NewAuthorizeUseCase(b.jwtService)
 }
 
 // cleanup libera recursos em caso de erro durante construção.
@@ -134,7 +138,7 @@ func (b *builder) toContainer() *Container {
 		validatorService: b.validatorService,
 		telemetryService: b.telemetryService,
 		authenticateUC:   b.authenticateUC,
+		authorizeUC:      b.authorizeUC,
 		closeFunc:        closeAll,
 	}
 }
-
