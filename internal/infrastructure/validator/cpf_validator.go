@@ -1,8 +1,8 @@
 package validator
 
 import (
-	"regexp"
 	"strconv"
+	"strings"
 )
 
 // CPFValidator implementa validação de CPF brasileiro
@@ -53,11 +53,21 @@ func (v *CPFValidator) ValidateCPF(cpf string) bool {
 	return true
 }
 
-// NormalizeCPF remove caracteres não numéricos do CPF
+// NormalizeCPF remove caracteres não numéricos do CPF.
+// Otimizado para usar strings.Builder ao invés de regex (melhor performance).
 func (v *CPFValidator) NormalizeCPF(cpf string) string {
-	// Remover tudo que não é número
-	re := regexp.MustCompile(`\D`)
-	return re.ReplaceAllString(cpf, "")
+	// Pre-allocate builder com tamanho máximo esperado (11 dígitos)
+	var builder strings.Builder
+	builder.Grow(11)
+
+	// Itera apenas uma vez, copiando apenas dígitos
+	for _, char := range cpf {
+		if char >= '0' && char <= '9' {
+			builder.WriteRune(char)
+		}
+	}
+
+	return builder.String()
 }
 
 // validateDigit valida um dígito verificador do CPF
@@ -85,8 +95,8 @@ func allDigitsEqual(cpf string) bool {
 	}
 
 	firstDigit := cpf[0]
-	for _, digit := range cpf {
-		if digit != firstDigit {
+	for i := 0; i < len(cpf); i++ {
+		if cpf[i] != firstDigit {
 			return false
 		}
 	}

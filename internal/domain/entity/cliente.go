@@ -4,23 +4,25 @@ import (
 	"time"
 )
 
-// Cliente representa um cliente no domínio
+// Cliente representa um cliente no domínio da Oficina Pro (LEGADO).
+// NOTA: Cliente é mantido apenas para compatibilidade com sistema legado CPF.
+// Para novos fluxos de autenticação, use Usuario (email+senha).
 type Cliente struct {
-	ID          int64
-	Nome        string
-	Email       string
-	Documento   string // CPF
-	TipoPessoa  string
-	Ativo       bool
-	DataCriacao time.Time
+	ID          int64     // Identificador único do cliente
+	Nome        string    // Nome completo do cliente
+	Email       string    // Email do cliente
+	Documento   string    // CPF do cliente (normalizado, apenas números)
+	TipoPessoa  string    // Tipo de pessoa (física/jurídica)
+	Ativo       bool      // Status de ativação do cliente
+	DataCriacao time.Time // Data de criação do registro
 }
 
-// IsValid verifica se o cliente é válido para autenticação
+// IsValid verifica se o cliente é válido para autenticação.
 func (c *Cliente) IsValid() bool {
 	return c.ID > 0 && c.Ativo && c.Documento != ""
 }
 
-// CanAuthenticate verifica se o cliente pode se autenticar
+// CanAuthenticate verifica se o cliente pode se autenticar.
 func (c *Cliente) CanAuthenticate() error {
 	if c.ID == 0 {
 		return ErrClienteNotFound
@@ -37,12 +39,14 @@ func (c *Cliente) CanAuthenticate() error {
 	return nil
 }
 
-// ToAuthPayload converte cliente para payload de autenticação
-func (c *Cliente) ToAuthPayload() map[string]interface{} {
-	return map[string]interface{}{
-		"cliente_id": c.ID,
-		"nome":       c.Nome,
-		"email":      c.Email,
-		"documento":  c.Documento,
+// ToAuthPayload converte cliente para payload de autenticação tipado.
+// DEPRECATED: Mantido apenas para compatibilidade com sistema legado CPF.
+// Para novos fluxos de auth, use Usuario.ToAuthPayload().
+func (c *Cliente) ToAuthPayload() *AuthPayload {
+	return &AuthPayload{
+		UserID: c.ID,
+		Email:  c.Email,
+		Nome:   c.Nome,
+		Role:   RoleUser, // Clientes legados sempre tem role USER
 	}
 }

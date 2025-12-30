@@ -3,6 +3,7 @@ package handler
 // HTTPRequest abstrai request HTTP (framework agnostic)
 type HTTPRequest struct {
 	Method  string
+	Path    string
 	Body    []byte
 	Headers map[string]string
 }
