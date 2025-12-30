@@ -12,8 +12,8 @@ import (
 func TestLoad_Success(t *testing.T) {
 	// Setup environment variables
 	os.Setenv("DB_HOST", "testhost")
-	os.Setenv("DB_PASSWORD", "testpassword")
-	os.Setenv("JWT_SECRET", "test-jwt-secret-min-32-characters-long")
+	os.Setenv("DB_PASSWORD", "dummy_password_for_tests")
+	os.Setenv("JWT_SECRET", "dummy_jwt_secret_min_32_chars_long")
 	defer cleanupEnv()
 
 	config, err := Load()
@@ -21,8 +21,8 @@ func TestLoad_Success(t *testing.T) {
 	require.NotNil(t, config)
 
 	assert.Equal(t, "testhost", config.Database.Host)
-	assert.Equal(t, "testpassword", config.Database.Password)
-	assert.Equal(t, "test-jwt-secret-min-32-characters-long", config.JWT.Secret)
+	assert.Equal(t, "dummy_password_for_tests", config.Database.Password)
+	assert.Equal(t, "dummy_jwt_secret_min_32_chars_long", config.JWT.Secret)
 }
 
 func TestLoad_Defaults(t *testing.T) {
@@ -79,10 +79,10 @@ func TestValidate_MissingDBHost(t *testing.T) {
 	config := &Config{
 		Database: DatabaseConfig{
 			Host:     "", // Missing
-			Password: "password",
+			Password: "dummy_password",
 		},
 		JWT: JWTConfig{
-			Secret: "test-jwt-secret-min-32-characters-long",
+			Secret: "dummy_jwt_secret_min_32_chars_long",
 		},
 	}
 
@@ -111,7 +111,7 @@ func TestValidate_MissingJWTSecret(t *testing.T) {
 	config := &Config{
 		Database: DatabaseConfig{
 			Host:     "localhost",
-			Password: "password",
+			Password: "dummy_password",
 		},
 		JWT: JWTConfig{
 			Secret: "", // Missing
@@ -127,7 +127,7 @@ func TestValidate_ShortJWTSecret(t *testing.T) {
 	config := &Config{
 		Database: DatabaseConfig{
 			Host:     "localhost",
-			Password: "password",
+			Password: "dummy_password",
 		},
 		JWT: JWTConfig{
 			Secret: "short", // Too short
@@ -342,12 +342,12 @@ func TestGetEnvAsFloat(t *testing.T) {
 }
 
 func TestTelemetryConfig(t *testing.T) {
-	os.Setenv("DB_PASSWORD", "required")
-	os.Setenv("JWT_SECRET", "test-jwt-secret-min-32-characters-long")
+	os.Setenv("DB_PASSWORD", "dummy_required")
+	os.Setenv("JWT_SECRET", "dummy_jwt_secret_min_32_chars_long")
 	os.Setenv("TELEMETRY_ENABLED", "true")
 	os.Setenv("TELEMETRY_SERVICE_NAME", "test-service")
 	os.Setenv("TELEMETRY_SERVICE_VERSION", "2.0.0")
-	os.Setenv("NEW_RELIC_LICENSE_KEY", "test-key")
+	os.Setenv("NEW_RELIC_LICENSE_KEY", "dummy_new_relic_key")
 	os.Setenv("TELEMETRY_SAMPLE_RATE", "0.5")
 	defer cleanupEnv()
 
@@ -357,7 +357,7 @@ func TestTelemetryConfig(t *testing.T) {
 	assert.True(t, config.Telemetry.Enabled)
 	assert.Equal(t, "test-service", config.Telemetry.ServiceName)
 	assert.Equal(t, "2.0.0", config.Telemetry.ServiceVersion)
-	assert.Equal(t, "test-key", config.Telemetry.NewRelicKey)
+	assert.Equal(t, "dummy_new_relic_key", config.Telemetry.NewRelicKey)
 	assert.Equal(t, 0.5, config.Telemetry.SampleRate)
 }
 
@@ -366,12 +366,12 @@ func TestCustomDatabaseConfig(t *testing.T) {
 	os.Setenv("DB_PORT", "5433")
 	os.Setenv("DB_NAME", "custom-db")
 	os.Setenv("DB_USER", "custom-user")
-	os.Setenv("DB_PASSWORD", "custom-pass")
+	os.Setenv("DB_PASSWORD", "dummy_custom_pass")
 	os.Setenv("DB_SSL_MODE", "require")
 	os.Setenv("DB_MAX_CONNECTIONS", "20")
 	os.Setenv("DB_MAX_IDLE_CONNECTIONS", "10")
 	os.Setenv("DB_CONNECTION_TIMEOUT", "45s")
-	os.Setenv("JWT_SECRET", "test-jwt-secret-min-32-characters-long")
+	os.Setenv("JWT_SECRET", "dummy_jwt_secret_min_32_chars_long")
 	defer cleanupEnv()
 
 	config, err := Load()
@@ -381,7 +381,7 @@ func TestCustomDatabaseConfig(t *testing.T) {
 	assert.Equal(t, "5433", config.Database.Port)
 	assert.Equal(t, "custom-db", config.Database.Database)
 	assert.Equal(t, "custom-user", config.Database.User)
-	assert.Equal(t, "custom-pass", config.Database.Password)
+	assert.Equal(t, "dummy_custom_pass", config.Database.Password)
 	assert.Equal(t, "require", config.Database.SSLMode)
 	assert.Equal(t, 20, config.Database.MaxConnections)
 	assert.Equal(t, 10, config.Database.MaxIdleConnections)
@@ -389,8 +389,8 @@ func TestCustomDatabaseConfig(t *testing.T) {
 }
 
 func TestJWTConfig(t *testing.T) {
-	os.Setenv("DB_PASSWORD", "required")
-	os.Setenv("JWT_SECRET", "my-very-long-jwt-secret-key-for-testing")
+	os.Setenv("DB_PASSWORD", "dummy_required")
+	os.Setenv("JWT_SECRET", "dummy_very_long_jwt_secret_key_for_testing")
 	os.Setenv("JWT_EXPIRATION_HOURS", "48")
 	os.Setenv("JWT_ISSUER", "custom-issuer")
 	defer cleanupEnv()
@@ -398,14 +398,14 @@ func TestJWTConfig(t *testing.T) {
 	config, err := Load()
 	require.NoError(t, err)
 
-	assert.Equal(t, "my-very-long-jwt-secret-key-for-testing", config.JWT.Secret)
+	assert.Equal(t, "dummy_very_long_jwt_secret_key_for_testing", config.JWT.Secret)
 	assert.Equal(t, 48*time.Hour, config.JWT.Expiration)
 	assert.Equal(t, "custom-issuer", config.JWT.Issuer)
 }
 
 func TestAWSConfig(t *testing.T) {
-	os.Setenv("DB_PASSWORD", "required")
-	os.Setenv("JWT_SECRET", "test-jwt-secret-min-32-characters-long")
+	os.Setenv("DB_PASSWORD", "dummy_required")
+	os.Setenv("JWT_SECRET", "dummy_jwt_secret_min_32_chars_long")
 	os.Setenv("AWS_REGION", "sa-east-1")
 	defer cleanupEnv()
 
@@ -416,8 +416,8 @@ func TestAWSConfig(t *testing.T) {
 }
 
 func TestAppConfig(t *testing.T) {
-	os.Setenv("DB_PASSWORD", "required")
-	os.Setenv("JWT_SECRET", "test-jwt-secret-min-32-characters-long")
+	os.Setenv("DB_PASSWORD", "dummy_required")
+	os.Setenv("JWT_SECRET", "dummy_jwt_secret_min_32_chars_long")
 	os.Setenv("ENVIRONMENT", "staging")
 	os.Setenv("LOG_LEVEL", "debug")
 	defer cleanupEnv()
