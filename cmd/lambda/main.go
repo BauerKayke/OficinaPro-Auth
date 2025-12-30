@@ -36,6 +36,7 @@ func init() {
 
 	authHandler := handler.NewAuthHandler(
 		container.AuthenticateUseCase(),
+		container.JWTService(),
 		errorMapper,
 		logger,
 	)
