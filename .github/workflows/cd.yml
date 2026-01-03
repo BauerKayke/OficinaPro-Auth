@@ -1,137 +1,41 @@
-name: CD
+name: CD Pipeline
 
 on:
   push:
-    branches:
-      - main
-      - develop
-
-env:
-  GO_VERSION: '1.23'
-  AWS_REGION: us-east-1
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  deploy-staging:
-    name: Deploy to Staging
-    if: github.ref == 'refs/heads/develop'
+  deploy:
+    name: Deploy to AWS Lambda
     runs-on: ubuntu-latest
-    environment: staging
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: '1.23'
           cache: true
 
-      - name: Build Lambda binary
+      - name: Build binary
         run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-            -ldflags="-s -w" \
-            -o bootstrap \
-            cmd/lambda/main.go
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
 
-      - name: Create deployment package
-        run: zip lambda.zip bootstrap
+      - name: Create ZIP
+        run: zip function.zip bootstrap
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Deploy to Lambda (Staging)
+      - name: Update Lambda Code
         run: |
           aws lambda update-function-code \
-            --function-name oficinapro-auth-staging \
-            --zip-file fileb://lambda.zip \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Wait for Lambda update
-        run: |
-          aws lambda wait function-updated \
-            --function-name oficinapro-auth-staging \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Test deployed function
-        run: |
-          aws lambda invoke \
-            --function-name oficinapro-auth-staging \
-            --payload '{"body":"{\"cpf\":\"12345678909\"}"}' \
-            --region ${{ env.AWS_REGION }} \
-            response.json
-          cat response.json
-
-  deploy-production:
-    name: Deploy to Production
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Build Lambda binary
-        run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-            -ldflags="-s -w" \
-            -o bootstrap \
-            cmd/lambda/main.go
-
-      - name: Create deployment package
-        run: zip lambda.zip bootstrap
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy to Lambda (Production)
-        run: |
-          aws lambda update-function-code \
-            --function-name oficinapro-auth-prod \
-            --zip-file fileb://lambda.zip \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Wait for Lambda update
-        run: |
-          aws lambda wait function-updated \
-            --function-name oficinapro-auth-prod \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Publish new version
-        run: |
-          aws lambda publish-version \
-            --function-name oficinapro-auth-prod \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Smoke test
-        run: |
-          aws lambda invoke \
-            --function-name oficinapro-auth-prod \
-            --payload '{"httpMethod":"POST","body":"{\"cpf\":\"12345678909\"}"}' \
-            --region ${{ env.AWS_REGION }} \
-            response.json
-
-          # Check if response is successful
-          if grep -q '"statusCode":200' response.json; then
-            echo "Smoke test passed!"
-          else
-            echo "Smoke test failed!"
-            cat response.json
-            exit 1
-          fi
-
+            --function-name oficinapro-auth-function \
+            --zip-file fileb://function.zip
