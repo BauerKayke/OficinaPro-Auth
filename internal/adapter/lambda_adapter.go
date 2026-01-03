@@ -71,6 +71,7 @@ func (a *LambdaAdapter) handleHttp(ctx context.Context, apiReq events.APIGateway
 	// Converter APIGateway V2 → HTTP abstrato
 	httpReq := handler.HTTPRequest{
 		Method:  apiReq.RequestContext.HTTP.Method,
+		Path:    apiReq.RequestContext.HTTP.Path,
 		Body:    []byte(apiReq.Body),
 		Headers: apiReq.Headers,
 	}
