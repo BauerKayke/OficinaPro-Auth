@@ -33,9 +33,9 @@ func (uc *AuthorizeUseCase) Execute(tokenString string) (bool, error) {
 		return false, fmt.Errorf("token validation failed: %w", err)
 	}
 
-	// Validação extra opcional: verificar se o CPF existe nos claims
-	if _, ok := claims["cpf"]; !ok {
-		return false, fmt.Errorf("token missing cpf claim")
+	// Validação extra: verificar se email existe (substituindo CPF legado)
+	if _, ok := claims["email"]; !ok {
+		return false, fmt.Errorf("token missing email claim")
 	}
 
 	return true, nil
