@@ -135,7 +135,7 @@ func TestCliente_ToAuthPayload(t *testing.T) {
 
 	// Testar conversão para map
 	resultMap := result.ToMap()
-	
+
 	// Verificar campos principais
 	assert.Equal(t, int64(123), resultMap["userId"])
 	assert.Equal(t, "Maria Oliveira", resultMap["nome"])

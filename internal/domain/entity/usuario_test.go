@@ -26,8 +26,9 @@ func TestUsuario_NewUsuario(t *testing.T) {
 }
 
 func TestUsuario_ValidatePassword(t *testing.T) {
-	// Hash da senha "senha123"
-	hashedPassword, err := HashPassword("senha123")
+	// Hash de uma senha de teste
+	testPassword := "testPass123"
+	hashedPassword, err := HashPassword(testPassword)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -39,13 +40,13 @@ func TestUsuario_ValidatePassword(t *testing.T) {
 		{
 			name:          "Senha correta",
 			storedHash:    hashedPassword,
-			plainPassword: "senha123",
+			plainPassword: testPassword,
 			expectedValid: true,
 		},
 		{
 			name:          "Senha incorreta",
 			storedHash:    hashedPassword,
-			plainPassword: "senhaerrada",
+			plainPassword: "wrongPassword",
 			expectedValid: false,
 		},
 		{
@@ -57,7 +58,7 @@ func TestUsuario_ValidatePassword(t *testing.T) {
 		{
 			name:          "Case sensitive",
 			storedHash:    hashedPassword,
-			plainPassword: "SENHA123",
+			plainPassword: "TESTPASS123",
 			expectedValid: false,
 		},
 	}
@@ -169,12 +170,12 @@ func TestHashPassword(t *testing.T) {
 	}{
 		{
 			name:          "Senha válida",
-			plainPassword: "senha123",
+			plainPassword: "validPass1",
 			expectError:   false,
 		},
 		{
 			name:          "Senha longa",
-			plainPassword: "senhamuitolongacomcaracteresvariadosabc123!@#",
+			plainPassword: "veryLongPasswordWithVariousCharacters123!@#",
 			expectError:   false,
 		},
 		{
@@ -213,8 +214,9 @@ func TestHashPassword(t *testing.T) {
 
 func TestHashPassword_DifferentHashes(t *testing.T) {
 	// Mesmo password deve gerar hashes diferentes (salt automático)
-	hash1, err1 := HashPassword("senha123")
-	hash2, err2 := HashPassword("senha123")
+	testPass := "testPassword"
+	hash1, err1 := HashPassword(testPass)
+	hash2, err2 := HashPassword(testPass)
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
@@ -223,8 +225,8 @@ func TestHashPassword_DifferentHashes(t *testing.T) {
 	// Mas ambos devem validar a mesma senha
 	usuario1 := &Usuario{Senha: hash1}
 	usuario2 := &Usuario{Senha: hash2}
-	assert.True(t, usuario1.ValidatePassword("senha123"))
-	assert.True(t, usuario2.ValidatePassword("senha123"))
+	assert.True(t, usuario1.ValidatePassword(testPass))
+	assert.True(t, usuario2.ValidatePassword(testPass))
 }
 
 func TestValidateEmail(t *testing.T) {
@@ -300,12 +302,12 @@ func TestValidatePasswordStrength(t *testing.T) {
 	}{
 		{
 			name:        "Senha válida (6 chars)",
-			password:    "senha1",
+			password:    "pass12",
 			expectedErr: nil,
 		},
 		{
 			name:        "Senha válida longa",
-			password:    "senhaSegura123!@#",
+			password:    "securePassword123!@#",
 			expectedErr: nil,
 		},
 		{
@@ -411,7 +413,7 @@ func TestUsuario_CompleteFlow(t *testing.T) {
 	// Simular fluxo completo de criação e autenticação de usuário
 
 	// 1. Criar senha hash
-	plainPassword := "senhaSegura123"
+	plainPassword := "secureTestPass123"
 	hashedPassword, err := HashPassword(plainPassword)
 	require.NoError(t, err)
 
@@ -435,7 +437,7 @@ func TestUsuario_CompleteFlow(t *testing.T) {
 	assert.True(t, usuario.ValidatePassword(plainPassword))
 
 	// 5. Validar senha incorreta
-	assert.False(t, usuario.ValidatePassword("senhaErrada"))
+	assert.False(t, usuario.ValidatePassword("wrongPassword"))
 
 	// 6. Display name
 	assert.Equal(t, "admin@oficinapro.com", usuario.GetDisplayName())

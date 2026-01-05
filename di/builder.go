@@ -104,7 +104,7 @@ func (b *builder) setupUseCases() {
 		b.jwtService,
 		b.telemetryService,
 	)
-	
+
 	// Novo UseCase de Autorização
 	b.authorizeUC = usecase.NewAuthorizeUseCase(b.jwtService)
 }

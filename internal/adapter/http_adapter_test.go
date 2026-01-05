@@ -139,4 +139,3 @@ func TestHTTPAdapter_ServeHTTP_ErrorResponse(t *testing.T) {
 	assert.Equal(t, `{"error":"invalid request"}`, w.Body.String())
 	mockHandler.AssertExpectations(t)
 }
-
