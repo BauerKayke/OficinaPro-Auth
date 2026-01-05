@@ -96,6 +96,24 @@ func TestLambdaAdapter_Handle_AuthorizerRequest_Unauthorized_InvalidToken(t *tes
 	assert.False(t, authResp.IsAuthorized, "Should not be authorized with invalid token")
 }
 
+func TestLambdaAdapter_Handle_HTTPRequest_InvalidJSON(t *testing.T) {
+	// Arrange
+	jwtService := jwt.NewJWTService("test-secret-key-minimum-32-chars!!", "test-issuer")
+	authorizeUC := usecase.NewAuthorizeUseCase(jwtService)
+	lambdaAdapter := adapter.NewLambdaAdapter(nil, authorizeUC)
+
+	// Evento com JSON inválido
+	rawEvent := json.RawMessage(`{invalid json`)
+
+	// Act
+	result, err := lambdaAdapter.Handle(context.Background(), rawEvent)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to unmarshal event")
+}
+
 func TestLambdaAdapter_Handle_AuthorizerRequest_Unauthorized_NoToken(t *testing.T) {
 	// Arrange
 	jwtService := jwt.NewJWTService("test-secret-key-minimum-32-chars!!", "test-issuer")
