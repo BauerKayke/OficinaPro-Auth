@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda"
 
 	"github.com/oficinapro/auth-service/di"
 	"github.com/oficinapro/auth-service/internal/adapter"
@@ -21,34 +23,43 @@ var (
 )
 
 func init() {
-	ctx := context.Background()
+	// Inicializar container DI (incluindo OpenTelemetry)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Inicializa dependências
 	var err error
 	container, err = di.NewContainer(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize container: %v", err)
 	}
 
-	// Cria AuthHandler
+	// Criar AuthHandler
 	errorMapper := handler.NewDefaultErrorMapper()
 	logger := infraLogger.NewStdLogger()
 
 	authHandler := handler.NewAuthHandler(
 		container.AuthenticateUseCase(),
+		container.JWTService(),
 		errorMapper,
 		logger,
 	)
 
-	// Cria adapter Lambda (Injetando AuthorizeUseCase também)
+	// Criar adapter Lambda
 	lambdaAdapter = adapter.NewLambdaAdapter(authHandler, container.AuthorizeUseCase())
 
-	// Configura graceful shutdown
+	// Configurar graceful shutdown
 	setupGracefulShutdown()
+
+	log.Println("Lambda initialized with OpenTelemetry instrumentation")
 }
 
 func main() {
-	lambda.Start(lambdaAdapter.Handle)
+	// Wrapper Lambda com OpenTelemetry
+	// Usa otellambda para instrumentação automática
+	wrappedHandler := otellambda.InstrumentHandler(lambdaAdapter.Handle)
+
+	// Iniciar Lambda
+	lambda.Start(wrappedHandler)
 }
 
 // setupGracefulShutdown configura limpeza de recursos quando Lambda container for desligado.
@@ -60,12 +71,16 @@ func setupGracefulShutdown() {
 	go func() {
 		<-sigChan
 		log.Println("Received shutdown signal, cleaning up resources...")
+
+		// Cleanup container (incluindo telemetry)
 		if container != nil {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			if err := container.Close(ctx); err != nil {
 				log.Printf("Error closing container: %v", err)
 			}
 		}
+
 		os.Exit(0)
 	}()
 }

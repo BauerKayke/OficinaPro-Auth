@@ -40,4 +40,3 @@ func (uc *AuthorizeUseCase) Execute(tokenString string) (bool, error) {
 
 	return true, nil
 }
-

@@ -14,4 +14,3 @@ func NewRepositories(db *gorm.DB) (repository.ClienteRepository, repository.Usua
 	usuarioRepo := database.NewGormUsuarioRepository(db)
 	return clienteRepo, usuarioRepo
 }
-

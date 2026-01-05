@@ -39,4 +39,3 @@ func NewTelemetryService(ctx context.Context, cfg *config.Config) (service.Telem
 
 	return otelService, cleanup, nil
 }
-

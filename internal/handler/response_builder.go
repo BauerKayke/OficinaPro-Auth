@@ -82,4 +82,3 @@ func (rb *ResponseBuilder) buildErrorResponse(statusCode int, message string) HT
 
 	return NewHTTPResponse(statusCode, body)
 }
-
