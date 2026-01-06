@@ -20,6 +20,10 @@ type TelemetryService interface {
 	// IncrementCounter incrementa contador
 	IncrementCounter(name string, attributes map[string]interface{})
 
+	// ForceFlush força envio de todos os spans/métricas pendentes
+	// Importante para Lambda: garante que dados sejam enviados antes do retorno
+	ForceFlush(ctx context.Context) error
+
 	// Shutdown finaliza o telemetry service
 	Shutdown(ctx context.Context) error
 }
