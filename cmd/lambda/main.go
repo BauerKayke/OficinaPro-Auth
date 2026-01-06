@@ -56,7 +56,11 @@ func init() {
 func main() {
 	// Wrapper Lambda com OpenTelemetry
 	// Usa otellambda para instrumentação automática
-	wrappedHandler := otellambda.InstrumentHandler(lambdaAdapter.Handle)
+	// WithFlusher garante que spans são enviados ANTES do Lambda retornar
+	wrappedHandler := otellambda.InstrumentHandler(
+		lambdaAdapter.Handle,
+		otellambda.WithFlusher(container.TelemetryService()),
+	)
 
 	// Iniciar Lambda
 	lambda.Start(wrappedHandler)

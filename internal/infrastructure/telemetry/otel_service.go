@@ -51,7 +51,7 @@ func NewOTelService(ctx context.Context, cfg Config) (*OTelService, error) {
 	}
 
 	// 2. Configurar Trace Exporter (New Relic OTLP HTTP)
-	// NewRelicEndpoint deve ser "otlp.nr-data.net:4318" (sem https://)
+	// NewRelicEndpoint deve ser "otlp.nr-data.net" (porta 443 HTTPS por padrão)
 	traceExporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint(cfg.NewRelicEndpoint),
 		otlptracehttp.WithHeaders(map[string]string{
@@ -64,12 +64,11 @@ func NewOTelService(ctx context.Context, cfg Config) (*OTelService, error) {
 	}
 
 	// 3. Configurar Trace Provider
+	// IMPORTANTE: Para Lambda, usar SimpleSpanProcessor para envio SÍNCRONO
+	// BatchSpanProcessor não funciona bem com Lambda porque o timeout de 5s
+	// é maior que a duração típica de uma invocação Lambda (~100-500ms)
 	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter,
-			sdktrace.WithMaxExportBatchSize(512),
-			sdktrace.WithBatchTimeout(5*time.Second),
-			sdktrace.WithMaxQueueSize(2048),
-		),
+		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(traceExporter)),
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(cfg.SampleRate)),
 	)
@@ -150,6 +149,27 @@ func (s *OTelService) IncrementCounter(name string, attributes map[string]interf
 	}
 	attrs := convertAttributes(attributes)
 	counter.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+}
+
+// ForceFlush força envio de todos os spans/métricas pendentes
+// Importante para Lambda: garante que dados sejam enviados antes do retorno
+func (s *OTelService) ForceFlush(ctx context.Context) error {
+	var errs []error
+
+	// Flush tracer (enviar spans pendentes)
+	if err := s.tracerProvider.ForceFlush(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("tracer flush: %w", err))
+	}
+
+	// Flush meter (enviar métricas pendentes)
+	if err := s.meterProvider.ForceFlush(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("meter flush: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("flush errors: %v", errs)
+	}
+	return nil
 }
 
 // Shutdown gracefully fecha providers

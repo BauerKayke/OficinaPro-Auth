@@ -71,6 +71,10 @@ func (n *NoOpTelemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (n *NoOpTelemetry) ForceFlush(ctx context.Context) error {
+	return nil
+}
+
 type NoOpSpan struct{}
 
 func (n *NoOpSpan) SetAttribute(key string, value interface{})              {}

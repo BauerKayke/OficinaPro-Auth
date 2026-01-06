@@ -32,6 +32,11 @@ func (s *NoOpTelemetryService) RecordDuration(name string, duration time.Duratio
 // IncrementCounter não faz nada.
 func (s *NoOpTelemetryService) IncrementCounter(name string, attributes map[string]interface{}) {}
 
+// ForceFlush não faz nada.
+func (s *NoOpTelemetryService) ForceFlush(ctx context.Context) error {
+	return nil
+}
+
 // Shutdown não faz nada.
 func (s *NoOpTelemetryService) Shutdown(ctx context.Context) error {
 	return nil

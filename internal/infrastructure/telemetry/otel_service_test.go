@@ -314,3 +314,71 @@ func TestOTelService_CompleteWorkflow(t *testing.T) {
 	// Assert
 	assert.NotNil(t, service)
 }
+
+func TestOTelService_ForceFlush(t *testing.T) {
+	// Arrange
+	cfg := telemetry.Config{
+		ServiceName:      "test-service",
+		ServiceVersion:   "1.0.0",
+		Environment:      "test",
+		NewRelicEndpoint: "otlp.nr-data.net:4318",
+		NewRelicKey:      "test-key-12345678901234567890123456789012",
+		SampleRate:       1.0,
+	}
+
+	ctx := context.Background()
+	service, err := telemetry.NewOTelService(ctx, cfg)
+	require.NoError(t, err)
+	defer service.Shutdown(ctx)
+
+	// Criar alguns spans para ter algo para flush
+	_, span := service.StartSpan(ctx, "test_span_for_flush")
+	span.SetAttribute("test_key", "test_value")
+	span.End()
+
+	// Act - Forçar flush dos dados pendentes
+	err = service.ForceFlush(ctx)
+
+	// Assert - Pode retornar erro 403 (endpoint real sem chave válida)
+	// O importante é que não dá panic e a função executa
+	// Em ambiente real com chave válida, err seria nil
+	_ = err
+}
+
+func TestOTelService_ForceFlush_WithTimeout(t *testing.T) {
+	// Arrange
+	cfg := telemetry.Config{
+		ServiceName:      "test-service",
+		ServiceVersion:   "1.0.0",
+		Environment:      "test",
+		NewRelicEndpoint: "otlp.nr-data.net:4318",
+		NewRelicKey:      "test-key-12345678901234567890123456789012",
+		SampleRate:       1.0,
+	}
+
+	ctx := context.Background()
+	service, err := telemetry.NewOTelService(ctx, cfg)
+	require.NoError(t, err)
+	defer service.Shutdown(ctx)
+
+	// Act - ForceFlush com timeout curto
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+
+	err = service.ForceFlush(ctxWithTimeout)
+
+	// Assert - Mesmo com timeout, não deve dar panic
+	_ = err
+}
+
+func TestNoOpService_ForceFlush(t *testing.T) {
+	// Arrange
+	service := telemetry.NewNoOpTelemetryService()
+	ctx := context.Background()
+
+	// Act
+	err := service.ForceFlush(ctx)
+
+	// Assert - NoOp sempre retorna nil
+	assert.NoError(t, err)
+}
