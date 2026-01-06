@@ -105,7 +105,7 @@ func Load() (*Config, error) {
 			ServiceName:      getEnv("TELEMETRY_SERVICE_NAME", "oficinapro-auth"),
 			ServiceVersion:   getEnv("TELEMETRY_SERVICE_VERSION", "1.0.0"),
 			NewRelicKey:      getEnv("NEW_RELIC_LICENSE_KEY", ""),
-			NewRelicEndpoint: getEnv("NEW_RELIC_OTLP_ENDPOINT", "otlp.nr-data.net:4318"),
+			NewRelicEndpoint: getEnv("NEW_RELIC_OTLP_ENDPOINT", "otlp.nr-data.net"), // Porta 443 HTTPS
 			SampleRate:       getEnvAsFloat("TELEMETRY_SAMPLE_RATE", 1.0),
 		},
 	}
