@@ -35,7 +35,18 @@ func init() {
 
 	// Criar AuthHandler
 	errorMapper := handler.NewDefaultErrorMapper()
-	logger := infraLogger.NewStdLogger()
+
+	// Usar logger JSON estruturado em produção para observabilidade
+	var logger handler.Logger
+	if os.Getenv("ENVIRONMENT") == "production" {
+		logger = infraLogger.NewJSONLogger(
+			os.Getenv("TELEMETRY_SERVICE_NAME"),
+			os.Getenv("TELEMETRY_SERVICE_VERSION"),
+			"production",
+		)
+	} else {
+		logger = infraLogger.NewStdLogger()
+	}
 
 	authHandler := handler.NewAuthHandler(
 		container.AuthenticateUseCase(),
