@@ -89,10 +89,28 @@ func setupGracefulShutdown() {
 
 		// Cleanup container (incluindo telemetry)
 		if container != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// Lambda tem até 2 segundos após SIGTERM antes de hard kill
+			// Usar 1.5s para ter margem de segurança
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 			defer cancel()
+
+			// Forçar flush de telemetria antes do shutdown
+			log.Println("Flushing telemetry data...")
+			if err := container.TelemetryService().ForceFlush(ctx); err != nil {
+				// Não logar "context canceled" como erro crítico
+				if err != context.Canceled && err != context.DeadlineExceeded {
+					log.Printf("Warning: failed to flush telemetry: %v", err)
+				}
+			}
+
+			// Shutdown completo
 			if err := container.Close(ctx); err != nil {
-				log.Printf("Error closing container: %v", err)
+				// Não logar "context canceled" como erro crítico
+				if err != context.Canceled && err != context.DeadlineExceeded {
+					log.Printf("Warning: telemetry shutdown error: %v", err)
+				}
+			} else {
+				log.Println("Telemetry shutdown completed successfully")
 			}
 		}
 
