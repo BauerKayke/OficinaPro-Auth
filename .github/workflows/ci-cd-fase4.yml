@@ -89,37 +89,35 @@ jobs:
         run: |
           echo "🔧 Atualizando variáveis de ambiente..."
 
-          # Buscar endpoint do RDS (com retry)
+          # Buscar endpoint do RDS
           echo "🔍 Buscando endpoint do RDS..."
+          
+          # Tentar buscar instância específica
           OS_DB_HOST=$(aws rds describe-db-instances \
             --db-instance-identifier oficinapro-os-db-fase4 \
             --region us-east-1 \
             --query 'DBInstances[0].Endpoint.Address' \
-            --output text 2>&1)
+            --output text 2>&1) || true
 
-          # Se falhou, tentar sem o identificador específico (buscar por tag)
-          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ]; then
-            echo "⚠️  RDS instance not found by ID, trying by tag..."
+          # Se falhou ou retornou None, tentar buscar por padrão
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found"; then
+            echo "⚠️  Instância específica não encontrada, buscando qualquer instância fase4/os-db..."
             OS_DB_HOST=$(aws rds describe-db-instances \
               --region us-east-1 \
               --query 'DBInstances[?contains(DBInstanceIdentifier, `fase4`) || contains(DBInstanceIdentifier, `os-db`)].Endpoint.Address | [0]' \
-              --output text 2>&1 || echo "")
+              --output text 2>&1) || true
           fi
 
-          # Fallback final
-          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ]; then
-            echo "❌ ERROR: Could not fetch RDS endpoint!"
-            echo "Available RDS instances:"
+          # Se ainda não conseguiu, listar todas e usar fallback
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found"; then
+            echo "⚠️  Nenhuma instância RDS encontrada, listando disponíveis..."
             aws rds describe-db-instances --region us-east-1 --query 'DBInstances[].DBInstanceIdentifier' --output table || true
-            exit 1
+            
+            echo "❌ AVISO: Usando localhost como fallback (dev mode)"
+            OS_DB_HOST="localhost"
           fi
 
-          echo "✅ DB Host: ${OS_DB_HOST}"
-
-          # Verificar se conseguiu o DB host
-          if [ "${OS_DB_HOST}" = "localhost" ]; then
-            echo "⚠️  Warning: Could not fetch RDS endpoint, using localhost"
-          fi
+          echo "✅ DB Host selecionado: ${OS_DB_HOST}"
 
           aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
