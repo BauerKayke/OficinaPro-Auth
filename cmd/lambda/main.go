@@ -35,7 +35,7 @@ func init() {
 		// Isso permite que health check funcione mesmo sem DB
 		containerInitErr = err
 		log.Printf("WARNING: Failed to initialize container (will work in degraded mode): %v", err)
-		
+
 		// Criar adapter com handler nulo para health check básico
 		lambdaAdapter = adapter.NewLambdaAdapter(nil, nil)
 		return
