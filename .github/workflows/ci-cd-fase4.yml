@@ -41,7 +41,7 @@ jobs:
         run: |
           echo "📊 Relatório de cobertura:"
           go tool cover -func=coverage.out
-          
+
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
           echo "**Cobertura de Testes:** ${COVERAGE}" >> $GITHUB_STEP_SUMMARY
 
@@ -51,7 +51,7 @@ jobs:
           GOPROXY=https://proxy.golang.org,direct \
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
           go build -tags lambda.norpc -ldflags="-s -w" -o bootstrap cmd/lambda/main.go
-          
+
           echo "📦 Binary size: $(du -h bootstrap | cut -f1)"
 
       - name: 'Create Lambda ZIP'
@@ -88,19 +88,42 @@ jobs:
       - name: 'Update Lambda Environment Variables'
         run: |
           echo "🔧 Atualizando variáveis de ambiente..."
-          
-          # Buscar endpoint do RDS
+
+          # Buscar endpoint do RDS (com retry)
+          echo "🔍 Buscando endpoint do RDS..."
           OS_DB_HOST=$(aws rds describe-db-instances \
             --db-instance-identifier oficinapro-os-db-fase4 \
+            --region us-east-1 \
             --query 'DBInstances[0].Endpoint.Address' \
-            --output text 2>/dev/null || echo "localhost")
-          
-          echo "DB Host: ${OS_DB_HOST}"
-          
+            --output text 2>&1)
+
+          # Se falhou, tentar sem o identificador específico (buscar por tag)
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ]; then
+            echo "⚠️  RDS instance not found by ID, trying by tag..."
+            OS_DB_HOST=$(aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[?contains(DBInstanceIdentifier, `fase4`) || contains(DBInstanceIdentifier, `os-db`)].Endpoint.Address | [0]' \
+              --output text 2>&1 || echo "")
+          fi
+
+          # Fallback final
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ]; then
+            echo "❌ ERROR: Could not fetch RDS endpoint!"
+            echo "Available RDS instances:"
+            aws rds describe-db-instances --region us-east-1 --query 'DBInstances[].DBInstanceIdentifier' --output table || true
+            exit 1
+          fi
+
+          echo "✅ DB Host: ${OS_DB_HOST}"
+
+          # Verificar se conseguiu o DB host
+          if [ "${OS_DB_HOST}" = "localhost" ]; then
+            echo "⚠️  Warning: Could not fetch RDS endpoint, using localhost"
+          fi
+
           aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
             --environment "Variables={
-              AWS_REGION=us-east-1,
               DB_HOST=${OS_DB_HOST},
               DB_PORT=5432,
               DB_NAME=os_db,
@@ -121,8 +144,9 @@ jobs:
               NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4318,
               TELEMETRY_SAMPLE_RATE=1.0
             }" \
+            --region us-east-1 \
             --output json > /dev/null
-          
+
           echo "✅ Variáveis atualizadas"
 
       - name: 'Deploy Lambda Code'
@@ -130,22 +154,22 @@ jobs:
         run: |
           echo "🚀 Deploying para Lambda..."
           DEPLOY_START=$(date +%s)
-          
+
           RESULT=$(aws lambda update-function-code \
             --function-name ${{ env.FUNCTION_NAME }} \
             --zip-file fileb://function.zip \
             --output json)
-          
+
           DEPLOY_END=$(date +%s)
           DEPLOY_TIME=$((DEPLOY_END - DEPLOY_START))
-          
+
           VERSION=$(echo "$RESULT" | jq -r '.Version')
           LAST_MODIFIED=$(echo "$RESULT" | jq -r '.LastModified')
           CODE_SIZE=$(echo "$RESULT" | jq -r '.CodeSize')
-          
+
           echo "deployment_time=${DEPLOY_TIME}" >> $GITHUB_OUTPUT
           echo "function_version=${VERSION}" >> $GITHUB_OUTPUT
-          
+
           echo "✅ Deployment completed:"
           echo "  Version: $VERSION"
           echo "  Last Modified: $LAST_MODIFIED"
@@ -180,23 +204,23 @@ jobs:
           API_URL=$(aws apigatewayv2 get-apis \
             --query 'Items[?Name==`oficinapro-auth-api-fase4`].ApiEndpoint | [0]' \
             --output text)
-          
+
           echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
           echo "✅ API Gateway URL: ${API_URL}"
 
       - name: 'Test Health Endpoint'
         run: |
           echo "🏥 Testando health endpoint..."
-          
+
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             ${{ steps.api_info.outputs.api_url }}/health)
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
-          
+
           echo "HTTP Code: $HTTP_CODE"
           echo "Response: $BODY"
-          
+
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✅ Health check passou!"
           else
@@ -207,19 +231,19 @@ jobs:
       - name: 'Test Auth Endpoint (Mock)'
         run: |
           echo "🧪 Testando endpoint de autenticação..."
-          
+
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -X POST \
             -H "Content-Type: application/json" \
             -d '{"email":"test@test.com","senha":"test123"}' \
             ${{ steps.api_info.outputs.api_url }}/auth)
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
-          
+
           echo "HTTP Code: $HTTP_CODE"
           echo "Response Body: $BODY"
-          
+
           # Aceitar 200 (sucesso) ou 401 (credenciais inválidas - esperado)
           if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
             echo "✅ Auth endpoint está respondendo corretamente"
@@ -230,7 +254,7 @@ jobs:
       - name: 'Check CloudWatch Logs'
         run: |
           echo "📊 Verificando logs recentes..."
-          
+
           aws logs tail /aws/lambda/${{ env.FUNCTION_NAME }} \
             --since 5m \
             --region ${{ env.AWS_REGION }} \
@@ -257,7 +281,7 @@ jobs:
           echo "| Deploy Lambda | ${{ needs.deploy-to-lambda.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Validation | ${{ needs.validate-deployment.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [[ "${{ needs.validate-deployment.result }}" == "success" ]]; then
             echo "### ✅ Deploy concluído com sucesso!" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
