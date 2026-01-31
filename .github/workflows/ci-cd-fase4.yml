@@ -89,35 +89,48 @@ jobs:
         run: |
           echo "🔧 Atualizando variáveis de ambiente..."
 
-          # Buscar endpoint do RDS
+          # Estratégia de busca do RDS endpoint (em ordem de prioridade)
           echo "🔍 Buscando endpoint do RDS..."
           
-          # Tentar buscar instância específica
+          # 1. Tentar buscar pela instância consolidada atual (Fase 4 otimizada)
           OS_DB_HOST=$(aws rds describe-db-instances \
-            --db-instance-identifier oficinapro-os-db-fase4 \
+            --db-instance-identifier oficinapro-consolidated-db \
             --region us-east-1 \
             --query 'DBInstances[0].Endpoint.Address' \
             --output text 2>&1) || true
 
-          # Se falhou ou retornou None, tentar buscar por padrão
-          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found"; then
-            echo "⚠️  Instância específica não encontrada, buscando qualquer instância fase4/os-db..."
+          # 2. Se não encontrou, tentar buscar por padrão de nome (fase4, consolidated, oficinapro)
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Instância consolidada não encontrada, buscando por padrão..."
             OS_DB_HOST=$(aws rds describe-db-instances \
               --region us-east-1 \
-              --query 'DBInstances[?contains(DBInstanceIdentifier, `fase4`) || contains(DBInstanceIdentifier, `os-db`)].Endpoint.Address | [0]' \
+              --query 'DBInstances[?contains(DBInstanceIdentifier, `fase4`) || contains(DBInstanceIdentifier, `consolidated`) || contains(DBInstanceIdentifier, `oficinapro`)].Endpoint.Address | [0]' \
               --output text 2>&1) || true
           fi
 
-          # Se ainda não conseguiu, listar todas e usar fallback
-          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found"; then
-            echo "⚠️  Nenhuma instância RDS encontrada, listando disponíveis..."
-            aws rds describe-db-instances --region us-east-1 --query 'DBInstances[].DBInstanceIdentifier' --output table || true
+          # 3. Se ainda não encontrou, listar todas as instâncias disponíveis
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Nenhuma instância por padrão, listando todas disponíveis..."
+            aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[].[DBInstanceIdentifier,Endpoint.Address,DBInstanceStatus]' \
+              --output table 2>&1 || true
             
-            echo "❌ AVISO: Usando localhost como fallback (dev mode)"
-            OS_DB_HOST="localhost"
+            # Tentar pegar a primeira instância disponível
+            OS_DB_HOST=$(aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[?DBInstanceStatus==`available`].Endpoint.Address | [0]' \
+              --output text 2>&1) || true
           fi
 
-          echo "✅ DB Host selecionado: ${OS_DB_HOST}"
+          # 4. Fallback para endpoint conhecido (verificado em 26/01/2026)
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Busca dinâmica falhou, usando endpoint conhecido como fallback..."
+            OS_DB_HOST="oficinapro-consolidated-db.cmz0ic48gh2u.us-east-1.rds.amazonaws.com"
+            echo "ℹ️  Usando endpoint fallback: ${OS_DB_HOST}"
+          else
+            echo "✅ Endpoint RDS encontrado dinamicamente: ${OS_DB_HOST}"
+          fi
 
           aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
@@ -145,7 +158,7 @@ jobs:
             --region us-east-1 \
             --output json > /dev/null
 
-          echo "✅ Variáveis atualizadas"
+          echo "✅ Variáveis de ambiente atualizadas com DB_HOST=${OS_DB_HOST}"
 
       - name: 'Deploy Lambda Code'
         id: deploy
