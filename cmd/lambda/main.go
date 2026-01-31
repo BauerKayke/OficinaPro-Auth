@@ -18,19 +18,27 @@ import (
 )
 
 var (
-	lambdaAdapter *adapter.LambdaAdapter
-	container     *di.Container
+	lambdaAdapter    *adapter.LambdaAdapter
+	container        *di.Container
+	containerInitErr error
 )
 
 func init() {
-	// Inicializar container DI (incluindo OpenTelemetry)
+	// Tentar inicializar container DI (incluindo OpenTelemetry)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var err error
 	container, err = di.NewContainer(ctx)
 	if err != nil {
-		log.Fatalf("Failed to initialize container: %v", err)
+		// NÃO falhar o init, apenas logar o erro
+		// Isso permite que health check funcione mesmo sem DB
+		containerInitErr = err
+		log.Printf("WARNING: Failed to initialize container (will work in degraded mode): %v", err)
+		
+		// Criar adapter com handler nulo para health check básico
+		lambdaAdapter = adapter.NewLambdaAdapter(nil, nil)
+		return
 	}
 
 	// Criar AuthHandler
@@ -61,17 +69,26 @@ func init() {
 	// Configurar graceful shutdown
 	setupGracefulShutdown()
 
-	log.Println("Lambda initialized with OpenTelemetry instrumentation")
+	log.Println("Lambda initialized successfully with OpenTelemetry instrumentation")
 }
 
 func main() {
-	// Wrapper Lambda com OpenTelemetry
-	// Usa otellambda para instrumentação automática
-	// WithFlusher garante que spans são enviados ANTES do Lambda retornar
-	wrappedHandler := otellambda.InstrumentHandler(
-		lambdaAdapter.Handle,
-		otellambda.WithFlusher(container.TelemetryService()),
-	)
+	// Verificar se houve erro na inicialização
+	if containerInitErr != nil {
+		log.Printf("WARNING: Running in degraded mode (health check only): %v", containerInitErr)
+	}
+
+	// Wrapper Lambda com OpenTelemetry (se disponível)
+	var wrappedHandler interface{}
+	if container != nil && container.TelemetryService() != nil {
+		wrappedHandler = otellambda.InstrumentHandler(
+			lambdaAdapter.Handle,
+			otellambda.WithFlusher(container.TelemetryService()),
+		)
+	} else {
+		// Sem telemetry se container falhou
+		wrappedHandler = lambdaAdapter.Handle
+	}
 
 	// Iniciar Lambda
 	lambda.Start(wrappedHandler)
