@@ -59,3 +59,4 @@ lambda.zip
 coverage.out
 coverage.html
 *.test
+.pre-commit-config.yaml
