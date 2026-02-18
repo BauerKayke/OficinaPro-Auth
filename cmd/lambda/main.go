@@ -25,21 +25,29 @@ var (
 
 func init() {
 	// Tentar inicializar container DI (incluindo OpenTelemetry)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// AUMENTADO: 30s para dar tempo ao cold start + conexão RDS
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	log.Printf("INFO: Starting container initialization (timeout: 30s)")
+	start := time.Now()
 
 	var err error
 	container, err = di.NewContainer(ctx)
+	elapsed := time.Since(start)
+
 	if err != nil {
 		// NÃO falhar o init, apenas logar o erro
 		// Isso permite que health check funcione mesmo sem DB
 		containerInitErr = err
-		log.Printf("WARNING: Failed to initialize container (will work in degraded mode): %v", err)
+		log.Printf("WARNING: Failed to initialize container after %v (will work in degraded mode): %v", elapsed, err)
 
 		// Criar adapter com handler nulo para health check básico
 		lambdaAdapter = adapter.NewLambdaAdapter(nil, nil)
 		return
 	}
+
+	log.Printf("INFO: Container initialized successfully in %v", elapsed)
 
 	// Criar AuthHandler
 	errorMapper := handler.NewDefaultErrorMapper()
