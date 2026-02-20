@@ -1,4 +1,4 @@
-.PHONY: help build test test-coverage clean run-local deploy lint fmt vet install-deps
+.PHONY: help build test test-coverage clean run-local deploy lint fmt vet install-deps terraform-init terraform-plan terraform-apply terraform-destroy
 
 # Variables
 BINARY_NAME=bootstrap
@@ -6,6 +6,8 @@ LAMBDA_ZIP=lambda.zip
 GO_FILES=$(shell find . -name '*.go' -type f)
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
+TERRAFORM_DIR=terraform/lambda
+AWS_REGION?=us-east-1
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -54,12 +56,12 @@ test-unit: ## Run unit tests only
 
 build: clean ## Build Lambda binary
 	@echo "Building Lambda binary..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY_NAME) cmd/lambda/main.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BINARY_NAME) ./cmd/lambda
 	@echo "Binary built: $(BINARY_NAME)"
 
 build-mac: clean ## Build for macOS (development)
 	@echo "Building for macOS..."
-	go build -o $(BINARY_NAME)-mac cmd/lambda/main.go
+	go build -o $(BINARY_NAME)-mac ./cmd/lambda
 	@echo "Binary built: $(BINARY_NAME)-mac"
 
 package: build ## Package Lambda for deployment
@@ -133,7 +135,98 @@ mod-update: ## Update Go dependencies
 
 all: clean lint test build ## Run all checks and build
 
-ci: lint test-coverage build ## CI pipeline
+ci: install-deps fmt vet test-coverage build ## CI pipeline (Complete validation)
+
+ci-fast: fmt vet test build ## CI pipeline (Fast - no coverage)
+
+# ==============================================================================
+# Terraform Targets
+# ==============================================================================
+
+terraform-init: ## Initialize Terraform
+	@echo "Initializing Terraform..."
+	cd $(TERRAFORM_DIR) && terraform init
+
+terraform-validate: ## Validate Terraform configuration
+	@echo "Validating Terraform..."
+	cd $(TERRAFORM_DIR) && terraform validate
+
+terraform-fmt: ## Format Terraform files
+	@echo "Formatting Terraform files..."
+	terraform fmt -recursive terraform/
+
+terraform-plan: build ## Run Terraform plan (requires Lambda binary)
+	@echo "Planning Terraform changes..."
+	@if [ ! -f $(BINARY_NAME) ]; then \
+		echo "Error: Lambda binary not found. Run 'make build' first"; \
+		exit 1; \
+	fi
+	cd $(TERRAFORM_DIR) && terraform plan -out=tfplan
+
+terraform-apply: ## Apply Terraform changes
+	@echo "Applying Terraform changes..."
+	@if [ ! -f $(TERRAFORM_DIR)/tfplan ]; then \
+		echo "Error: tfplan not found. Run 'make terraform-plan' first"; \
+		exit 1; \
+	fi
+	cd $(TERRAFORM_DIR) && terraform apply tfplan
+	@rm -f $(TERRAFORM_DIR)/tfplan
+	@echo "✅ Deployment completed!"
+	@echo ""
+	@echo "API Gateway URL:"
+	@cd $(TERRAFORM_DIR) && terraform output -raw api_gateway_url
+	@echo ""
+
+terraform-apply-auto: build ## Build and apply Terraform (auto-approve - use with caution!)
+	@echo "Building and deploying Lambda..."
+	cd $(TERRAFORM_DIR) && terraform apply -auto-approve
+	@echo "✅ Deployment completed!"
+
+terraform-output: ## Show Terraform outputs
+	@cd $(TERRAFORM_DIR) && terraform output
+
+terraform-destroy: ## Destroy Terraform infrastructure
+	@echo "⚠️  WARNING: This will destroy all infrastructure!"
+	@echo "Press Ctrl+C to cancel, or Enter to continue..."
+	@read confirm
+	cd $(TERRAFORM_DIR) && terraform destroy
+
+terraform-clean: ## Clean Terraform files
+	@echo "Cleaning Terraform files..."
+	@rm -rf $(TERRAFORM_DIR)/.terraform $(TERRAFORM_DIR)/.terraform.lock.hcl
+	@rm -f $(TERRAFORM_DIR)/tfplan $(TERRAFORM_DIR)/terraform.tfstate*
+	@rm -f $(TERRAFORM_DIR)/lambda-deployment.zip
+	@echo "Terraform files cleaned"
+
+# Complete deployment workflow
+deploy-infra: build terraform-plan terraform-apply ## Complete deployment workflow (build + plan + apply)
+
+# Quick redeploy (updates Lambda code only via Terraform)
+redeploy: build terraform-apply-auto ## Quick redeploy (build + auto-apply)
+
+# Test deployed Lambda
+test-lambda: ## Test deployed Lambda endpoint
+	@echo "Testing Lambda endpoint..."
+	@API_URL=$$(cd $(TERRAFORM_DIR) && terraform output -raw api_gateway_url 2>/dev/null); \
+	if [ -z "$$API_URL" ]; then \
+		echo "Error: API Gateway URL not found. Deploy first with 'make deploy-infra'"; \
+		exit 1; \
+	fi; \
+	echo "Testing health endpoint: $$API_URL/health"; \
+	curl -s $$API_URL/health | jq; \
+	echo ""; \
+	echo "Testing auth endpoint: $$API_URL/auth"; \
+	curl -s -X POST $$API_URL/auth \
+		-H "Content-Type: application/json" \
+		-d '{"email":"admin@oficinapro.com","senha":"senha123"}' | jq
+
+# View Lambda logs
+logs-lambda: ## View Lambda CloudWatch logs
+	@FUNCTION_NAME=$$(cd $(TERRAFORM_DIR) && terraform output -raw lambda_function_name 2>/dev/null); \
+	if [ -z "$$FUNCTION_NAME" ]; then \
+		echo "Error: Lambda function name not found."; \
+		exit 1; \
+	fi; \
+	aws logs tail /aws/lambda/$$FUNCTION_NAME --follow --region $(AWS_REGION)
 
 .DEFAULT_GOAL := help
-

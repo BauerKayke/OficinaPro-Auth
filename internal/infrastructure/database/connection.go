@@ -9,7 +9,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // Driver PostgreSQL
 )
 
-// Config representa a configuração do banco de dados
+// Config representa a configuração do banco de dados.
+// Compartilhada entre implementações sql.DB e GORM.
 type Config struct {
 	Host            string
 	Port            string
@@ -22,7 +23,8 @@ type Config struct {
 	ConnMaxLifetime time.Duration
 }
 
-// NewConnection cria uma nova conexão com o banco de dados
+// NewConnection cria uma nova conexão com database/sql padrão.
+// Para a maioria dos casos, preferir NewGormConnection que fornece mais recursos.
 func NewConnection(config Config) (*sql.DB, error) {
 	// Montar connection string
 	dsn := fmt.Sprintf(
@@ -57,7 +59,7 @@ func NewConnection(config Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// Close fecha a conexão com o banco de dados
+// Close fecha a conexão com o banco de dados e libera recursos.
 func Close(db *sql.DB) error {
 	if db != nil {
 		log.Println("[Database] Fechando conexão")

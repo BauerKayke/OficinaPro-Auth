@@ -1,0 +1,259 @@
+name: CI/CD - Order Service
+
+on:
+  push:
+    branches: [ main, develop, 'feature/*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: order-service
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Run tests
+      run: go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.out
+        flags: unittests
+        name: codecov-order-service
+
+  docker-build-push:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    
+    permissions:
+      contents: read
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get AWS Account ID and ECR Registry
+      id: aws-account
+      run: |
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> $GITHUB_OUTPUT
+        echo "ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com" >> $GITHUB_OUTPUT
+        echo "✅ ECR Registry: ${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+
+    - name: Log in to Amazon ECR
+      run: |
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+        docker login --username AWS --password-stdin ${{ steps.aws-account.outputs.ECR_REGISTRY }}
+
+    - name: Extract metadata (tags, labels)
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.aws-account.outputs.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha
+          type=raw,value=latest
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-to-k3s:
+    name: Deploy to K3s Master
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get K3s Master IP
+      id: k3s-master-ip
+      run: |
+        echo "🔍 Buscando IP do K3s Master Node..."
+        
+        MASTER_IP=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=*master*" \
+                    "Name=instance-state-name,Values=running" \
+          --query "Reservations[0].Instances[0].PublicIpAddress" \
+          --output text 2>/dev/null || echo "None")
+        
+        if [ "$MASTER_IP" = "None" ] || [ -z "$MASTER_IP" ]; then
+          MASTER_IP=$(aws ec2 describe-instances \
+            --filters "Name=instance-type,Values=t3.small" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text 2>/dev/null || echo "None")
+        fi
+        
+        if [ "$MASTER_IP" = "None" ] || [ -z "$MASTER_IP" ]; then
+          echo "❌ ERRO: Master Node não encontrado"
+          exit 1
+        fi
+        
+        echo "MASTER_IP=${MASTER_IP}" >> $GITHUB_OUTPUT
+        echo "✅ Master IP: ${MASTER_IP}"
+
+    - name: Get RDS endpoint
+      id: rds-endpoint
+      run: |
+        echo "🔍 Buscando RDS endpoint..."
+        
+        RDS_ENDPOINT=$(aws rds describe-db-instances \
+          --query "DBInstances[?contains(DBInstanceIdentifier, 'oficinapro')].Endpoint.Address | [0]" \
+          --output text 2>/dev/null || echo "None")
+        
+        if [ "$RDS_ENDPOINT" = "None" ] || [ -z "$RDS_ENDPOINT" ]; then
+          RDS_ENDPOINT=$(aws rds describe-db-instances \
+            --query "DBInstances[0].Endpoint.Address" \
+            --output text)
+        fi
+        
+        echo "RDS_ENDPOINT=${RDS_ENDPOINT}" >> $GITHUB_OUTPUT
+        echo "✅ RDS: ${RDS_ENDPOINT}"
+
+    - name: Update deployment manifest
+      run: |
+        DOCKER_TAG=$(echo "${{ needs.docker-build-push.outputs.image-tag }}" | head -1)
+        echo "Using Docker image: $DOCKER_TAG"
+        
+        cd k8s/order-service
+        
+        # Atualizar imagem
+        sed -i "s|image:.*order-service.*|image: ${DOCKER_TAG}|g" deployment.yaml
+        
+        # Atualizar RDS endpoint
+        sed -i "s|value:.*rds.amazonaws.com.*|value: \"${{ steps.rds-endpoint.outputs.RDS_ENDPOINT }}\"|g" deployment.yaml
+
+    - name: Read manifest
+      id: read-manifest
+      run: |
+        CONTENT=$(cat k8s/order-service/deployment.yaml)
+        echo "content<<EOF" >> $GITHUB_OUTPUT
+        echo "$CONTENT" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Deploy to K3s
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ steps.k3s-master-ip.outputs.MASTER_IP }}
+        username: ubuntu
+        key: ${{ secrets.K3S_SSH_PRIVATE_KEY }}
+        script: |
+          export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_REGION="${{ env.AWS_REGION }}"
+          
+          echo "🔐 Configurando ECR credentials..."
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          
+          ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_REGION})
+          echo "$ECR_TOKEN" | sudo kubectl create secret docker-registry ecr-secret \
+            --docker-server=${ECR_REGISTRY} \
+            --docker-username=AWS \
+            --docker-password="$(cat)" \
+            --namespace=oficinapro-prod \
+            --dry-run=client -o yaml | sudo kubectl apply -f -
+          
+          echo "🧹 Limpando deployment antigo..."
+          sudo kubectl delete deployment order-service -n oficinapro-prod --ignore-not-found=true
+          
+          echo "📦 Aplicando deployment..."
+          cat > /tmp/order-deployment.yaml << 'DEPLOY_EOF'
+          ${{ steps.read-manifest.outputs.content }}
+          DEPLOY_EOF
+          
+          sudo kubectl apply -f /tmp/order-deployment.yaml
+          
+          echo "⏳ Aguardando rollout..."
+          sudo kubectl rollout status deployment/order-service -n oficinapro-prod --timeout=180s
+          
+          echo "✅ Deployment concluído!"
+          sudo kubectl get pods -n oficinapro-prod -l app=order-service -o wide
+
+    - name: Health check
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ steps.k3s-master-ip.outputs.MASTER_IP }}
+        username: ubuntu
+        key: ${{ secrets.K3S_SSH_PRIVATE_KEY }}
+        script: |
+          echo "⏳ Aguardando pod ficar pronto..."
+          sleep 20
+          
+          POD_NAME=$(sudo kubectl get pods -n oficinapro-prod -l app=order-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+          
+          if [ -n "$POD_NAME" ] && [ "$POD_NAME" != "null" ]; then
+            echo "📊 Pod: $POD_NAME"
+            
+            if sudo kubectl exec -n oficinapro-prod $POD_NAME -- curl -f -s http://localhost:8080/health > /dev/null 2>&1; then
+              echo "✅ Health check passou!"
+            else
+              echo "⚠️ Health check falhou"
+              sudo kubectl logs -n oficinapro-prod $POD_NAME --tail=30
+              exit 1
+            fi
+          else
+            echo "❌ Pod não encontrado"
+            sudo kubectl get pods -n oficinapro-prod -o wide
+            exit 1
+          fi
+
+    - name: Deploy summary
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Service**: Order Service" >> $GITHUB_STEP_SUMMARY
+        echo "**Image**: ${{ needs.docker-build-push.outputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
+        echo "**K3s Master IP**: ${{ steps.k3s-master-ip.outputs.MASTER_IP }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Namespace**: oficinapro-prod" >> $GITHUB_STEP_SUMMARY
+        echo "**Node Affinity**: master (t3.small)" >> $GITHUB_STEP_SUMMARY
+        echo "**Port**: 8080" >> $GITHUB_STEP_SUMMARY

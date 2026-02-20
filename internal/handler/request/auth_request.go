@@ -3,23 +3,50 @@ package request
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
-// AuthRequest representa o request de autenticação
+// AuthRequest representa a requisição de autenticação via email e senha.
+// Alinhado com AuthenticationRequest do core-domain-service (Java).
 type AuthRequest struct {
-	CPF string `json:"cpf"`
+	Email string `json:"email"` // Email do usuário
+	Senha string `json:"senha"` // Senha em texto plano (será validada com bcrypt)
 }
 
-// Validate valida o request de autenticação
+// Validate valida os campos obrigatórios da requisição.
 func (r *AuthRequest) Validate() error {
-	if r.CPF == "" {
-		return errors.New("CPF is required")
+	// Trim espaços para evitar valores apenas com espaços
+	r.Email = strings.TrimSpace(r.Email)
+	r.Senha = strings.TrimSpace(r.Senha)
+
+	if r.Email == "" {
+		return errors.New("email is required")
+	}
+
+	// Validação básica de formato de email
+	if !strings.Contains(r.Email, "@") || !strings.Contains(r.Email, ".") {
+		return errors.New("invalid email format")
+	}
+
+	if r.Senha == "" {
+		return errors.New("senha is required")
+	}
+
+	// Validação mínima de tamanho (para login, não cadastro)
+	if len(r.Senha) < 6 {
+		return errors.New("senha must be at least 6 characters")
 	}
 
 	return nil
 }
 
-// ParseAuthRequest faz parse do body JSON para AuthRequest
+// NormalizeEmail normaliza email para lowercase para comparação case-insensitive.
+func (r *AuthRequest) NormalizeEmail() {
+	r.Email = strings.ToLower(strings.TrimSpace(r.Email))
+}
+
+// ParseAuthRequest faz parse do body JSON para AuthRequest.
+// Retorna erro se o JSON for inválido ou malformado.
 func ParseAuthRequest(body string) (*AuthRequest, error) {
 	var request AuthRequest
 

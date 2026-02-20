@@ -1,3 +1,5 @@
+// Package config fornece configuração centralizada da aplicação.
+// Carrega variáveis de ambiente e valida configurações obrigatórias.
 package config
 
 import (
@@ -10,10 +12,11 @@ import (
 )
 
 type Config struct {
-	Database DatabaseConfig
-	JWT      JWTConfig
-	AWS      AWSConfig
-	App      AppConfig
+	Database  DatabaseConfig
+	JWT       JWTConfig
+	AWS       AWSConfig
+	App       AppConfig
+	Telemetry TelemetryConfig
 }
 
 type DatabaseConfig struct {
@@ -43,9 +46,34 @@ type AppConfig struct {
 	LogLevel    string
 }
 
+// TelemetryConfig configurações de observabilidade (OpenTelemetry + New Relic).
+type TelemetryConfig struct {
+	Enabled          bool    // Habilita telemetry
+	ServiceName      string  // Nome do serviço
+	ServiceVersion   string  // Versão do serviço
+	NewRelicKey      string  // New Relic License Key
+	NewRelicEndpoint string  // New Relic OTLP endpoint
+	SampleRate       float64 // Taxa de amostragem (0.0 a 1.0)
+}
+
 func Load() (*Config, error) {
 	if os.Getenv("ENVIRONMENT") != "production" {
 		_ = godotenv.Load()
+	}
+
+	// Determinar defaults baseado no ambiente
+	// Produção (Lambda): pool pequeno para evitar "too many connections"
+	// Desenvolvimento: pool maior para permitir múltiplas conexões locais
+	isProduction := os.Getenv("ENVIRONMENT") == "production"
+
+	defaultMaxConns := 10
+	defaultIdleConns := 5
+	defaultConnTimeout := 30
+
+	if isProduction {
+		defaultMaxConns = 2
+		defaultIdleConns = 1
+		defaultConnTimeout = 10
 	}
 
 	config := &Config{
@@ -56,9 +84,9 @@ func Load() (*Config, error) {
 			User:               getEnv("DB_USER", "postgres"),
 			Password:           getEnv("DB_PASSWORD", ""),
 			SSLMode:            getEnv("DB_SSL_MODE", "disable"),
-			MaxConnections:     getEnvAsInt("DB_MAX_CONNECTIONS", 10),
-			MaxIdleConnections: getEnvAsInt("DB_MAX_IDLE_CONNECTIONS", 5),
-			ConnectionTimeout:  getEnvAsDuration("DB_CONNECTION_TIMEOUT", 30*time.Second),
+			MaxConnections:     getEnvAsInt("DB_MAX_CONNECTIONS", defaultMaxConns),
+			MaxIdleConnections: getEnvAsInt("DB_MAX_IDLE_CONNECTIONS", defaultIdleConns),
+			ConnectionTimeout:  getEnvAsDuration("DB_CONNECTION_TIMEOUT", time.Duration(defaultConnTimeout)*time.Second),
 		},
 		JWT: JWTConfig{
 			Secret:     getEnv("JWT_SECRET", ""),
@@ -71,6 +99,14 @@ func Load() (*Config, error) {
 		App: AppConfig{
 			Environment: getEnv("ENVIRONMENT", "development"),
 			LogLevel:    getEnv("LOG_LEVEL", "info"),
+		},
+		Telemetry: TelemetryConfig{
+			Enabled:          getEnvAsBool("TELEMETRY_ENABLED", true),
+			ServiceName:      getEnv("TELEMETRY_SERVICE_NAME", "oficinapro-auth"),
+			ServiceVersion:   getEnv("TELEMETRY_SERVICE_VERSION", "1.0.0"),
+			NewRelicKey:      getEnv("NEW_RELIC_LICENSE_KEY", ""),
+			NewRelicEndpoint: getEnv("NEW_RELIC_OTLP_ENDPOINT", "otlp.nr-data.net"), // Porta 443 HTTPS
+			SampleRate:       getEnvAsFloat("TELEMETRY_SAMPLE_RATE", 1.0),
 		},
 	}
 
@@ -127,6 +163,30 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 	}
 
 	value, err := time.ParseDuration(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
 	if err != nil {
 		return defaultValue
 	}

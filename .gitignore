@@ -51,3 +51,12 @@ build/
 .aws-sam/
 samconfig.toml
 
+# Build artifacts
+bootstrap
+bootstrap-mac
+lambda
+lambda.zip
+coverage.out
+coverage.html
+*.test
+.pre-commit-config.yaml
