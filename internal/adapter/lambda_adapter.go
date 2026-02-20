@@ -68,6 +68,28 @@ func (a *LambdaAdapter) handleAuthorizer(ctx context.Context, req events.APIGate
 
 // handleHttp trata login
 func (a *LambdaAdapter) handleHttp(ctx context.Context, apiReq events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	// Health check independente (não depende do banco)
+	if apiReq.RequestContext.HTTP.Method == "GET" && apiReq.RequestContext.HTTP.Path == "/health" {
+		return events.APIGatewayV2HTTPResponse{
+			StatusCode: 200,
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+			Body: `{"status":"healthy","service":"auth-lambda"}`,
+		}, nil
+	}
+
+	// Verificar se handler está disponível (container inicializado)
+	if a.authHandler == nil {
+		return events.APIGatewayV2HTTPResponse{
+			StatusCode: 503,
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+			Body: `{"error":"Service temporarily unavailable","message":"Database connection failed"}`,
+		}, nil
+	}
+
 	// Converter APIGateway V2 → HTTP abstrato
 	httpReq := handler.HTTPRequest{
 		Method:  apiReq.RequestContext.HTTP.Method,

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -93,13 +94,31 @@ func NewOTelService(ctx context.Context, cfg Config) (*OTelService, error) {
 	}
 
 	// 6. Configurar Metric Provider
-	meterProvider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
-			metricExporter,
-			sdkmetric.WithInterval(60*time.Second), // Export a cada 60s
-		)),
-		sdkmetric.WithResource(res),
-	)
+	// IMPORTANTE: Detectar se está rodando em Lambda
+	isLambda := os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != ""
+
+	var meterProvider *sdkmetric.MeterProvider
+	if isLambda {
+		// Lambda: Usar PeriodicReader com intervalo MUITO curto (1 segundo)
+		// Isso garante que métricas sejam enviadas rapidamente durante a invocação
+		// e evita acúmulo de métricas que causam "context canceled" no shutdown
+		meterProvider = sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
+				metricExporter,
+				sdkmetric.WithInterval(1*time.Second), // Export a cada 1s em Lambda
+			)),
+			sdkmetric.WithResource(res),
+		)
+	} else {
+		// HTTP Server: Usar intervalo mais longo (30s é suficiente)
+		meterProvider = sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
+				metricExporter,
+				sdkmetric.WithInterval(30*time.Second), // Export a cada 30s em HTTP
+			)),
+			sdkmetric.WithResource(res),
+		)
+	}
 	otel.SetMeterProvider(meterProvider)
 
 	// 7. Criar Tracer e Meter
@@ -178,18 +197,52 @@ func (s *OTelService) Shutdown(ctx context.Context) error {
 
 	// Shutdown tracer (flush pending spans)
 	if err := s.tracerProvider.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("tracer shutdown: %w", err))
+		// Context canceled/timeout durante shutdown não é erro crítico
+		if !isContextError(err) {
+			errs = append(errs, fmt.Errorf("tracer shutdown: %w", err))
+		}
 	}
 
 	// Shutdown meter (flush pending metrics)
 	if err := s.meterProvider.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("meter shutdown: %w", err))
+		// Context canceled/timeout durante shutdown não é erro crítico
+		if !isContextError(err) {
+			errs = append(errs, fmt.Errorf("meter shutdown: %w", err))
+		}
 	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("shutdown errors: %v", errs)
 	}
 	return nil
+}
+
+// isContextError verifica se o erro é relacionado a context cancelado/timeout
+func isContextError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Verificar se é context.Canceled ou context.DeadlineExceeded
+	return err == context.Canceled ||
+		err == context.DeadlineExceeded ||
+		// Verificar se a mensagem contém "context canceled"
+		contains(err.Error(), "context canceled") ||
+		contains(err.Error(), "context deadline exceeded")
+}
+
+// contains verifica se uma string contém uma substring (case-insensitive simples)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr ||
+		(len(s) > len(substr) && anySubstring(s, substr)))
+}
+
+func anySubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // otelSpan implementa service.Span

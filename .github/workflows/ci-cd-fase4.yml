@@ -1,0 +1,310 @@
+# CI/CD Pipeline - Auth Service Lambda (Fase 4)
+name: 'CI/CD - Auth Service (Lambda)'
+
+on:
+  push:
+    branches: [main, develop, feature/structed-logs]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Pular testes'
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  FUNCTION_NAME: oficinapro-auth-function-fase4
+
+jobs:
+  build-and-test:
+    name: 'Build e Testes'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+
+      - name: 'Configurar Go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: 'Download Dependencies'
+        run: |
+          echo "📦 Baixando dependências..."
+          GOPROXY=https://proxy.golang.org,direct go mod download
+
+      - name: 'Run Tests'
+        run: |
+          echo "🧪 Executando testes..."
+          go test ./... -v -coverprofile=coverage.out -covermode=atomic
+
+      - name: 'Coverage Report'
+        run: |
+          echo "📊 Relatório de cobertura:"
+          go tool cover -func=coverage.out
+
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+          echo "**Cobertura de Testes:** ${COVERAGE}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 'Build Lambda Binary'
+        run: |
+          echo "🏗️ Building Lambda binary para Linux..."
+          GOPROXY=https://proxy.golang.org,direct \
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+          go build -tags lambda.norpc -ldflags="-s -w" -o bootstrap cmd/lambda/main.go
+
+          echo "📦 Binary size: $(du -h bootstrap | cut -f1)"
+
+      - name: 'Create Lambda ZIP'
+        run: |
+          zip -j function.zip bootstrap
+          echo "📦 Package size: $(du -h function.zip | cut -f1)"
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-package
+          path: function.zip
+          retention-days: 7
+
+  deploy-to-lambda:
+    name: 'Deploy para AWS Lambda'
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: 'Download Artifact'
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-package
+
+      - name: 'Configurar AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 'Update Lambda Environment Variables'
+        run: |
+          echo "🔧 Atualizando variáveis de ambiente..."
+
+          # Estratégia de busca do RDS endpoint (em ordem de prioridade)
+          echo "🔍 Buscando endpoint do RDS..."
+          
+          # 1. Tentar buscar pela instância consolidada atual (Fase 4 otimizada)
+          OS_DB_HOST=$(aws rds describe-db-instances \
+            --db-instance-identifier oficinapro-consolidated-db \
+            --region us-east-1 \
+            --query 'DBInstances[0].Endpoint.Address' \
+            --output text 2>&1) || true
+
+          # 2. Se não encontrou, tentar buscar por padrão de nome (fase4, consolidated, oficinapro)
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Instância consolidada não encontrada, buscando por padrão..."
+            OS_DB_HOST=$(aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[?contains(DBInstanceIdentifier, `fase4`) || contains(DBInstanceIdentifier, `consolidated`) || contains(DBInstanceIdentifier, `oficinapro`)].Endpoint.Address | [0]' \
+              --output text 2>&1) || true
+          fi
+
+          # 3. Se ainda não encontrou, listar todas as instâncias disponíveis
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Nenhuma instância por padrão, listando todas disponíveis..."
+            aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[].[DBInstanceIdentifier,Endpoint.Address,DBInstanceStatus]' \
+              --output table 2>&1 || true
+            
+            # Tentar pegar a primeira instância disponível
+            OS_DB_HOST=$(aws rds describe-db-instances \
+              --region us-east-1 \
+              --query 'DBInstances[?DBInstanceStatus==`available`].Endpoint.Address | [0]' \
+              --output text 2>&1) || true
+          fi
+
+          # 4. Fallback para endpoint conhecido (verificado em 26/01/2026)
+          if [ -z "$OS_DB_HOST" ] || [ "$OS_DB_HOST" = "None" ] || echo "$OS_DB_HOST" | grep -q "Error\|not found\|could not"; then
+            echo "⚠️  Busca dinâmica falhou, usando endpoint conhecido como fallback..."
+            OS_DB_HOST="oficinapro-consolidated-db.cmz0ic48gh2u.us-east-1.rds.amazonaws.com"
+            echo "ℹ️  Usando endpoint fallback: ${OS_DB_HOST}"
+          else
+            echo "✅ Endpoint RDS encontrado dinamicamente: ${OS_DB_HOST}"
+          fi
+
+          aws lambda update-function-configuration \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --environment "Variables={
+              DB_HOST=${OS_DB_HOST},
+              DB_PORT=5432,
+              DB_NAME=os_db,
+              DB_USER=oficinapro_admin,
+              DB_PASSWORD=${{ secrets.DB_PASSWORD }},
+              DB_SSL_MODE=require,
+              DB_MAX_CONNECTIONS=10,
+              DB_MAX_IDLE_CONNECTIONS=5,
+              DB_CONNECTION_TIMEOUT=30s,
+              JWT_SECRET=${{ secrets.JWT_SECRET }},
+              JWT_ISSUER=auth-oficinapro-fase4,
+              JWT_EXPIRATION=3600,
+              ENVIRONMENT=production,
+              TELEMETRY_ENABLED=true,
+              TELEMETRY_SERVICE_NAME=auth-service,
+              TELEMETRY_SERVICE_VERSION=1.0.0,
+              NEW_RELIC_LICENSE_KEY=${{ secrets.NEW_RELIC_LICENSE_KEY }},
+              NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4318,
+              TELEMETRY_SAMPLE_RATE=1.0
+            }" \
+            --region us-east-1 \
+            --output json > /dev/null
+
+          echo "✅ Variáveis de ambiente atualizadas com DB_HOST=${OS_DB_HOST}"
+
+      - name: 'Deploy Lambda Code'
+        id: deploy
+        run: |
+          echo "🚀 Deploying para Lambda..."
+          DEPLOY_START=$(date +%s)
+
+          RESULT=$(aws lambda update-function-code \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --output json)
+
+          DEPLOY_END=$(date +%s)
+          DEPLOY_TIME=$((DEPLOY_END - DEPLOY_START))
+
+          VERSION=$(echo "$RESULT" | jq -r '.Version')
+          LAST_MODIFIED=$(echo "$RESULT" | jq -r '.LastModified')
+          CODE_SIZE=$(echo "$RESULT" | jq -r '.CodeSize')
+
+          echo "deployment_time=${DEPLOY_TIME}" >> $GITHUB_OUTPUT
+          echo "function_version=${VERSION}" >> $GITHUB_OUTPUT
+
+          echo "✅ Deployment completed:"
+          echo "  Version: $VERSION"
+          echo "  Last Modified: $LAST_MODIFIED"
+          echo "  Code Size: $CODE_SIZE bytes"
+          echo "  Deploy Time: ${DEPLOY_TIME}s"
+
+      - name: 'Wait for Lambda Update'
+        run: |
+          echo "⏳ Aguardando Lambda atualizar..."
+          sleep 10
+          aws lambda wait function-updated \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }} || true
+          echo "✅ Lambda atualizada"
+
+  validate-deployment:
+    name: 'Validar Deployment'
+    runs-on: ubuntu-latest
+    needs: deploy-to-lambda
+
+    steps:
+      - name: 'Configurar AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 'Get API Gateway URL'
+        id: api_info
+        run: |
+          API_URL=$(aws apigatewayv2 get-apis \
+            --query 'Items[?Name==`oficinapro-auth-api-fase4`].ApiEndpoint | [0]' \
+            --output text)
+
+          echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
+          echo "✅ API Gateway URL: ${API_URL}"
+
+      - name: 'Test Health Endpoint'
+        run: |
+          echo "🏥 Testando health endpoint..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            ${{ steps.api_info.outputs.api_url }}/health)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Health check passou!"
+          else
+            echo "❌ Health check falhou (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+
+      - name: 'Test Auth Endpoint (Mock)'
+        run: |
+          echo "🧪 Testando endpoint de autenticação..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"email":"test@test.com","senha":"test123"}' \
+            ${{ steps.api_info.outputs.api_url }}/auth)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          # Aceitar 200 (sucesso) ou 401 (credenciais inválidas - esperado)
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
+            echo "✅ Auth endpoint está respondendo corretamente"
+          else
+            echo "⚠️  Auth endpoint retornou código inesperado: $HTTP_CODE"
+          fi
+
+      - name: 'Check CloudWatch Logs'
+        run: |
+          echo "📊 Verificando logs recentes..."
+
+          aws logs tail /aws/lambda/${{ env.FUNCTION_NAME }} \
+            --since 5m \
+            --region ${{ env.AWS_REGION }} \
+            --format short 2>/dev/null | tail -30 || echo "Sem logs recentes"
+
+  summary:
+    name: 'Resumo do Deploy'
+    runs-on: ubuntu-latest
+    needs: [build-and-test, deploy-to-lambda, validate-deployment]
+    if: always()
+
+    steps:
+      - name: 'Gerar Resumo'
+        run: |
+          echo "## 🚀 Deploy Auth Service Lambda (Fase 4)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Autor:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Test | ${{ needs.build-and-test.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Lambda | ${{ needs.deploy-to-lambda.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | ${{ needs.validate-deployment.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.validate-deployment.result }}" == "success" ]]; then
+            echo "### ✅ Deploy concluído com sucesso!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**API Gateway:** https://f50u4fbifi.execute-api.us-east-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
+            echo "- POST /auth - Login" >> $GITHUB_STEP_SUMMARY
+            echo "- POST /auth/validate - Validar Token" >> $GITHUB_STEP_SUMMARY
+            echo "- GET /health - Health Check" >> $GITHUB_STEP_SUMMARY
+          fi

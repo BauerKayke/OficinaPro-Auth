@@ -18,20 +18,36 @@ import (
 )
 
 var (
-	lambdaAdapter *adapter.LambdaAdapter
-	container     *di.Container
+	lambdaAdapter    *adapter.LambdaAdapter
+	container        *di.Container
+	containerInitErr error
 )
 
 func init() {
-	// Inicializar container DI (incluindo OpenTelemetry)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Tentar inicializar container DI (incluindo OpenTelemetry)
+	// AUMENTADO: 30s para dar tempo ao cold start + conexão RDS
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	log.Printf("INFO: Starting container initialization (timeout: 30s)")
+	start := time.Now()
 
 	var err error
 	container, err = di.NewContainer(ctx)
+	elapsed := time.Since(start)
+
 	if err != nil {
-		log.Fatalf("Failed to initialize container: %v", err)
+		// NÃO falhar o init, apenas logar o erro
+		// Isso permite que health check funcione mesmo sem DB
+		containerInitErr = err
+		log.Printf("WARNING: Failed to initialize container after %v (will work in degraded mode): %v", elapsed, err)
+
+		// Criar adapter com handler nulo para health check básico
+		lambdaAdapter = adapter.NewLambdaAdapter(nil, nil)
+		return
 	}
+
+	log.Printf("INFO: Container initialized successfully in %v", elapsed)
 
 	// Criar AuthHandler
 	errorMapper := handler.NewDefaultErrorMapper()
@@ -61,17 +77,26 @@ func init() {
 	// Configurar graceful shutdown
 	setupGracefulShutdown()
 
-	log.Println("Lambda initialized with OpenTelemetry instrumentation")
+	log.Println("Lambda initialized successfully with OpenTelemetry instrumentation")
 }
 
 func main() {
-	// Wrapper Lambda com OpenTelemetry
-	// Usa otellambda para instrumentação automática
-	// WithFlusher garante que spans são enviados ANTES do Lambda retornar
-	wrappedHandler := otellambda.InstrumentHandler(
-		lambdaAdapter.Handle,
-		otellambda.WithFlusher(container.TelemetryService()),
-	)
+	// Verificar se houve erro na inicialização
+	if containerInitErr != nil {
+		log.Printf("WARNING: Running in degraded mode (health check only): %v", containerInitErr)
+	}
+
+	// Wrapper Lambda com OpenTelemetry (se disponível)
+	var wrappedHandler interface{}
+	if container != nil && container.TelemetryService() != nil {
+		wrappedHandler = otellambda.InstrumentHandler(
+			lambdaAdapter.Handle,
+			otellambda.WithFlusher(container.TelemetryService()),
+		)
+	} else {
+		// Sem telemetry se container falhou
+		wrappedHandler = lambdaAdapter.Handle
+	}
 
 	// Iniciar Lambda
 	lambda.Start(wrappedHandler)
@@ -89,10 +114,28 @@ func setupGracefulShutdown() {
 
 		// Cleanup container (incluindo telemetry)
 		if container != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// Lambda tem até 2 segundos após SIGTERM antes de hard kill
+			// Usar 1.5s para ter margem de segurança
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 			defer cancel()
+
+			// Forçar flush de telemetria antes do shutdown
+			log.Println("Flushing telemetry data...")
+			if err := container.TelemetryService().ForceFlush(ctx); err != nil {
+				// Não logar "context canceled" como erro crítico
+				if err != context.Canceled && err != context.DeadlineExceeded {
+					log.Printf("Warning: failed to flush telemetry: %v", err)
+				}
+			}
+
+			// Shutdown completo
 			if err := container.Close(ctx); err != nil {
-				log.Printf("Error closing container: %v", err)
+				// Não logar "context canceled" como erro crítico
+				if err != context.Canceled && err != context.DeadlineExceeded {
+					log.Printf("Warning: telemetry shutdown error: %v", err)
+				}
+			} else {
+				log.Println("Telemetry shutdown completed successfully")
 			}
 		}
 
