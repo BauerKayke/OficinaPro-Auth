@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Pular testes'
+        type: boolean
+        default: false
 
 env:
   AWS_REGION: us-east-1
